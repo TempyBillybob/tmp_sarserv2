@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31613.86
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SAR Server App", "SAR Server App.csproj", "{CB7C39A8-0399-432C-99EC-9925C59CF685}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{CB7C39A8-0399-432C-99EC-9925C59CF685}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CB7C39A8-0399-432C-99EC-9925C59CF685}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CB7C39A8-0399-432C-99EC-9925C59CF685}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CB7C39A8-0399-432C-99EC-9925C59CF685}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {ADF86DE8-FBA2-4F1A-911D-92F107FB404C}
+	EndGlobalSection
+EndGlobal
