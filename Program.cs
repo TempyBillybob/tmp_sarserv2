@@ -10,7 +10,7 @@ namespace WC.SARS
             Logger.Header("Super Animal Royale Version: 0.90.2\n");
             if (args.Length > 0)
             {
-                Match m12 = new Match(int.Parse(args[1]), args[0], false, false);
+                Match m = new Match(int.Parse(args[1]), args[0], false, false);
             }
             else
             {
