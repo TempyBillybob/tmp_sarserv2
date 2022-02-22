@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Lidgren.Network;
 using System.Threading;
 
@@ -17,6 +18,8 @@ namespace WC.SARS
         public double timeUntilStart, gasAdvanceTimer;
         int prevTime = DateTime.Now.Second;
 
+        private List<Player> player_list;
+
         //these get to go at some point, or never. I'm quite lazy.
         public bool DEBUG_ENABLED;
         public bool ANOYING_DEBUG1;
@@ -30,7 +33,6 @@ namespace WC.SARS
             timeUntilStart = 90.00;
             gasAdvanceTimer = -1;
             updateThread = new Thread(serverUpdateThread);
-
 
             DEBUG_ENABLED = db;
             ANOYING_DEBUG1 = annoying;
@@ -422,12 +424,12 @@ namespace WC.SARS
             {
                 // Request Authentication
                 case 1:
-                    Console.WriteLine($"Authentication Request! -- Sender: {msg.SenderConnection}");
+                    Logger.Header($"Authentication Requestion\nSender: {msg.SenderEndPoint}\n");
                     sendAuthToPlayer(msg.SenderConnection);
                     break;
 
                 case 3:
-                    Console.WriteLine($"Ready message from -- {msg.SenderConnection} -- Read Player Info");
+                    Logger.Header($"Sender {msg.SenderEndPoint}'s Ready Received. Now, let's read their player-character info.");
                     for (short i = 0; i < playerList.Length; i++)
                     {
                         if (playerList[i] == null)
@@ -737,6 +739,9 @@ namespace WC.SARS
                 case 51:
                     serverSendCoconutEaten(msg);
                     break;
+                case 53:
+                    serverSendCutGrass(msg);
+                    break;
                 //clientSendVehicleHitPlayer
                 case 60:
                     serverSendVehicleHitPlayer(msg);
@@ -862,7 +867,7 @@ namespace WC.SARS
             acceptMsg.Write((byte)2);
             acceptMsg.Write(true);
             server.SendMessage(acceptMsg, client, NetDeliveryMethod.ReliableOrdered);
-            Logger.Basic($"Server sent client: {client} their accept message!");
+            Logger.Success($"Server sent {client.RemoteEndPoint} their accept message!");
         }
 
         //message 3 > << message 4 >> --still needs working ------ make seed random
@@ -922,7 +927,7 @@ namespace WC.SARS
                     sendPlayerPosition.Write(playerList[i].deathExplosionID); //explosionIndex [SHORT]
                     for (int j = 0; j < playerList[i].emoteIDs.Length; j++)
                     {
-                        Console.WriteLine("loop ammount: " + j);
+                        Logger.Warn("Loop Ammount: " + j);
                         sendPlayerPosition.Write(playerList[i].emoteIDs[j]); //emoteIndex [SHORT]
                     }
                     sendPlayerPosition.Write(playerList[i].hatID); //hatIndex [SHORT]
@@ -964,9 +969,9 @@ namespace WC.SARS
                     sendPlayerPosition.Write((short)25); //list of something gets added...
 
                 }
-                else { Console.WriteLine($"playerList[{i}] is null. Breaking... "); break; }// break out of loop
+                else { Logger.Warn($"playerList[{i}] is null. Breakout time. (sure hope {i+1}, {i+2}, {i+3}... is null as well :])"); break; }// break out of loop
             }
-            Logger.Success("Sending playerPositions packet!!!");
+            Logger.Success("Going to be sending new player all other player positions.");
             server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced); // CHANGED FROM BOTTOM TO THIS IDK WHAT IT DOES
                                                                                        //server.SendMessage(sendPlayerPosition, msg.SenderConnection, NetDeliveryMethod.UnreliableSequenced);
         }
@@ -1246,6 +1251,43 @@ namespace WC.SARS
                             responseMsg = $"Insufficient amount of arguments provided. This command takes 1. Given: {command.Length - 1}.";
                         }
                         break;
+                    case "/forceland":
+                        if (command.Length > 1)
+                        {
+                            short forceID;
+                            if(short.TryParse(command[1], out forceID))
+                            {
+                                if (!(forceID < 0) && !(forceID > 64))
+                                {
+                                    for(int fl = 0; fl < playerList.Length; fl++)
+                                    {
+                                        if (playerList[fl] != null && playerList[fl]?.assignedID == forceID)
+                                        {
+                                            NetOutgoingMessage sendEject = server.CreateMessage();
+                                            sendEject.Write((byte)8);
+                                            sendEject.Write(playerList[fl].assignedID);
+                                            sendEject.Write(playerList[fl].position_X);
+                                            sendEject.Write(playerList[fl].position_Y);
+                                            sendEject.Write(true);
+                                            server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
+                                            responseMsg = "Command executed successfully?";
+                                            break;
+                                        }
+                                        responseMsg = $"Player ID {forceID} not found.";
+                                    }
+                                }
+                                else
+                                {
+                                    responseMsg = $"Provided argument, '{forceID}' not valid. 0-64.";
+                                }
+                            }
+                        }
+                        else
+                        {
+                            responseMsg = $"Insufficient amount of arguments provided. This command takes 1. Given: {command.Length - 1}.";
+                        }
+
+                        break;
 
                     default:
                         Logger.Failure("Invalid command used.");
@@ -1325,7 +1367,7 @@ namespace WC.SARS
 
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
         }
-        
+
         //send 51
         private void serverSendCoconutEaten(NetIncomingMessage message)
         {
@@ -1336,10 +1378,27 @@ namespace WC.SARS
                 if (client.hp > 200) { client.hp = 200; }
             }
             NetOutgoingMessage msg = server.CreateMessage();
-            msg.Write( (byte)52 );
+            msg.Write((byte)52);
             msg.Write(getPlayerID(message.SenderConnection));
             msg.Write(message.ReadInt16());
             server.SendToAll(msg, NetDeliveryMethod.ReliableUnordered);
+        }
+
+        //r(53) >> s(54)
+        private void serverSendCutGrass(NetIncomingMessage message)
+        {
+            byte bladesCut = message.ReadByte();
+            NetOutgoingMessage grassMsg = server.CreateMessage();
+            grassMsg.Write((byte)54);
+            grassMsg.Write(getPlayerID(message.SenderConnection));
+            grassMsg.Write(bladesCut);
+            for (byte i = 0; i < bladesCut; i++)
+            {
+                grassMsg.Write(message.ReadInt16()); //x
+                grassMsg.Write(message.ReadInt16()); //y
+            }
+
+            server.SendToAll(grassMsg, NetDeliveryMethod.ReliableOrdered);
         }
 
         //send 61
