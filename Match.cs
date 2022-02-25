@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using Lidgren.Network;
 using System.Threading;
 
@@ -10,15 +9,12 @@ namespace WC.SARS
         
         private NetPeerConfiguration config;
         public NetServer server;
-        public Player[] playerList;
+        public Player[] player_list;
         public Thread updateThread;
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
-        private int slpTime;
+        private int slpTime, prevTime;
         private bool matchStarted, matchFull;
         public double timeUntilStart, gasAdvanceTimer;
-        int prevTime = DateTime.Now.Second;
-
-        private List<Player> player_list;
 
         //these get to go at some point, or never. I'm quite lazy.
         public bool DEBUG_ENABLED;
@@ -29,9 +25,10 @@ namespace WC.SARS
             slpTime = 10;
             matchStarted = false;
             matchFull = false;
-            playerList = new Player[64];
+            player_list = new Player[64];
             timeUntilStart = 90.00;
             gasAdvanceTimer = -1;
+            prevTime = DateTime.Now.Second;
             updateThread = new Thread(serverUpdateThread);
 
             DEBUG_ENABLED = db;
@@ -70,13 +67,13 @@ namespace WC.SARS
                                         Logger.Warn("Searching for player that disconnected.");
                                         //Logger.Warn($"{msg.SenderEndPoint} has disconnected...");
                                         short plr = getPlayerArrayIndex(msg.SenderConnection);
-                                        if (plr != -2)
+                                        if (plr != -1)
                                         {
                                             NetOutgoingMessage playerLeft = server.CreateMessage();
                                             playerLeft.Write((byte)46);
-                                            playerLeft.Write(playerList[plr].assignedID);
+                                            playerLeft.Write(player_list[plr].myID);
                                             playerLeft.Write(false); //isAdminGhosting -- not quite sure how to determine this
-                                            playerList[plr] = null;
+                                            player_list[plr] = null;
                                             server.SendToAll(playerLeft, NetDeliveryMethod.ReliableOrdered);
                                             Logger.Success("Player Disconnected and dealt with successfully.");
                                         }
@@ -135,14 +132,14 @@ namespace WC.SARS
             //lobby
             while (!matchStarted)
             {
-                if (playerList[playerList.Length - 1] != null && !matchFull)
+                if (player_list[player_list.Length - 1] != null && !matchFull)
                 {
                     matchFull = true;
                     Logger.Basic("Match seems to be full!");
                 }
 
                 //check the count down timer
-                if (!matchStarted && (playerList[0] != null)) { checkStartTime(); }
+                if (!matchStarted && (player_list[0] != null)) { checkStartTime(); }
                 //inform everyone of new time ^^
 
 
@@ -188,12 +185,12 @@ namespace WC.SARS
             playerUpdate.Write((byte)11); // Header -- Basic Update Info
 
             //Find Length of Actual Players
-            //Logger.Warn($"playerlist length: {(byte)playerList.Length}");
-            //playerUpdate.Write((byte)playerList.); // Ammount of times to loop (for amount of players, you know?
+            //Logger.Warn($"player_list length: {(byte)player_list.Length}");
+            //playerUpdate.Write((byte)player_list.); // Ammount of times to loop (for amount of players, you know?
 
-            for (byte i = 0; i < playerList.Length; i++)
+            for (byte i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] == null)
+                if (player_list[i] == null)
                 {
                     playerUpdate.Write(i); // Ammount of times to loop (for amount of players, you know?
                     //Logger.Header($"list length: {i}");
@@ -203,14 +200,14 @@ namespace WC.SARS
                 else { continue; }
             }
 
-            for (int i = 0; i < playerList.Length; i++)
+            for (int i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] != null)
+                if (player_list[i] != null)
                 {
-                    playerUpdate.Write(playerList[i].assignedID); // may be able to simplfiy by just writing "I"
-                    playerUpdate.Write(playerList[i].mouseAngle);
-                    playerUpdate.Write(playerList[i].position_X); //REALLY need to fix this...
-                    playerUpdate.Write(playerList[i].position_Y); //really need to fix this as well...
+                    playerUpdate.Write(player_list[i].myID); // may be able to simplfiy by just writing "I"
+                    playerUpdate.Write(player_list[i].mouseAngle);
+                    playerUpdate.Write(player_list[i].position_X); //REALLY need to fix this...
+                    playerUpdate.Write(player_list[i].position_Y); //really need to fix this as well...
                 }
                 else { break; } //exits
             }
@@ -220,9 +217,9 @@ namespace WC.SARS
         {
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)45); //b == 45
-            for (byte i = 0; i < playerList.Length; i++)
+            for (byte i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] == null)
+                if (player_list[i] == null)
                 {
                     msg.Write(i);
                     //unfortunately the amount of times the client is told to loop, is stated at the beginning.
@@ -232,17 +229,17 @@ namespace WC.SARS
                 }
             }
 
-            for (int i = 0; i < playerList.Length; i++)
+            for (int i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] != null) //just to make sure? TODO: make there be an actual reason to do this...
+                if (player_list[i] != null) //just to make sure? TODO: make there be an actual reason to do this...
                 {
-                    msg.Write(playerList[i].assignedID);
-                    msg.Write(playerList[i].hp);
-                    msg.Write(playerList[i].armorTier);
-                    msg.Write(playerList[i].armorTapes);
-                    msg.Write(playerList[i].currWalkMode);
-                    msg.Write(playerList[i].drinkies);
-                    msg.Write(playerList[i].tapies);
+                    msg.Write(player_list[i].myID);
+                    msg.Write(player_list[i].hp);
+                    msg.Write(player_list[i].armorTier);
+                    msg.Write(player_list[i].armorTapes);
+                    msg.Write(player_list[i].currWalkMode);
+                    msg.Write(player_list[i].drinkies);
+                    msg.Write(player_list[i].tapies);
                 }
                 else { break; }//this *may* cause some problems later
                 /*this can be stated elsewhere, but the way this is dealt with currently WILL cause problems.
@@ -265,17 +262,17 @@ namespace WC.SARS
         {
             NetOutgoingMessage pings = server.CreateMessage();
             byte i = 0;
-            for (i = 0; i < playerList.Length; i++)
+            for (i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] == null)
+                if (player_list[i] == null)
                 {
-                    pings.Write(i); //problematic -- what if playerList[3 && 5] are normal, but playerList[4] == null? [5] is skipped...
+                    pings.Write(i); //problematic -- what if player_list[3 && 5] are normal, but player_list[4] == null? [5] is skipped...
                     break;
                 }
             }
             for (byte j = 0; j < i; j++)
             {
-                pings.Write(playerList[j].assignedID);
+                pings.Write(player_list[j].myID);
                 pings.Write((short)420);//ping in ms
             }
             server.SendToAll(pings, NetDeliveryMethod.ReliableUnordered);
@@ -286,31 +283,31 @@ namespace WC.SARS
             //other than the attrocious constant checking, this also only heal the player by 5 each time, when in actuality
             //the player may be able to receive health juice in any amount and the game usually lets the player heal until
             //they are truly out of drinkies. this... this doesn't right now... so yeah...
-            for (int i = 0; i < playerList.Length; i++)
+            for (int i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] != null)
+                if (player_list[i] != null)
                 {
-                    if (playerList[i].isHealing)
+                    if (player_list[i].isHealing)
                     {
-                        if (playerList[i].hp != 100)
+                        if (player_list[i].hp != 100)
                         {
-                            for (int j = 0; j < playerList[i].drinkies; j++)
+                            for (int j = 0; j < player_list[i].drinkies; j++)
                             {
-                                if ((playerList[i].drinkies - 5) >= 0)
+                                if ((player_list[i].drinkies - 5) >= 0)
                                 {
-                                    playerList[i].drinkies -= 5;
-                                    playerList[i].hp += 5;
-                                    if (playerList[i].hp > 100)
+                                    player_list[i].drinkies -= 5;
+                                    player_list[i].hp += 5;
+                                    if (player_list[i].hp > 100)
                                     {
-                                        playerList[i].hp = 100;
+                                        player_list[i].hp = 100;
                                     }
                                 }
                                 else
                                 {
-                                    playerList[i].isHealing = false;
+                                    player_list[i].isHealing = false;
                                     NetOutgoingMessage tmp_drinkFinish = server.CreateMessage();
                                     tmp_drinkFinish.Write((byte)49);
-                                    tmp_drinkFinish.Write(playerList[i].assignedID);
+                                    tmp_drinkFinish.Write(player_list[i].myID);
                                     server.SendToAll(tmp_drinkFinish, NetDeliveryMethod.ReliableSequenced);
                                     break;
                                 }
@@ -318,10 +315,10 @@ namespace WC.SARS
                         }
                         else
                         {
-                            playerList[i].isHealing = false;
+                            player_list[i].isHealing = false;
                             NetOutgoingMessage tmp_drinkFinish = server.CreateMessage();
                             tmp_drinkFinish.Write((byte)49);
-                            tmp_drinkFinish.Write(playerList[i].assignedID);
+                            tmp_drinkFinish.Write(player_list[i].myID);
                             server.SendToAll(tmp_drinkFinish, NetDeliveryMethod.ReliableSequenced);
                             break;
                         }
@@ -383,6 +380,8 @@ namespace WC.SARS
                 }
             }
         }
+        
+        //TODO : Make this better :3
         private void sendStartGame()
         {
             if (DEBUG_ENABLED) { Logger.Warn("Sending game begin to all clients!"); }
@@ -428,11 +427,12 @@ namespace WC.SARS
                     sendAuthToPlayer(msg.SenderConnection);
                     break;
 
-                case 3:
+                case 3: // still has work to be done
                     Logger.Header($"Sender {msg.SenderEndPoint}'s Ready Received. Now, let's read their player-character info.");
-                    for (short i = 0; i < playerList.Length; i++)
+                    serverHandlePlayerConnection(msg);
+                    /*for (short i = 0; i < player_list.Length; i++)
                     {
-                        if (playerList[i] == null)
+                        if (player_list[i] == null)
                         {
                             //pID = i;
                             ulong steamID = msg.ReadUInt64(); //steamID64- this is from ME! :D
@@ -458,25 +458,25 @@ namespace WC.SARS
                             //short skinShort = msg.ReadInt16(); // indexInJSONFileList
                             //byte skinKey = msg.ReadByte(); // keyValuePair.Value
 
-                            playerList[i] = new Player(i, charID, umbrellaID, gravestoneID, deathExplosionID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, skinIndexID, skinShorts, skinValues);
-                            playerList[i].sender = msg.SenderConnection;
-                            playerList[i].myName = readName;
-                            switch (steamID) // todo: make this... not hard coded...
+                            player_list[i] = new Player(i, charID, umbrellaID, gravestoneID, deathExplosionID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, skinIndexID, skinShorts, skinValues);
+                            player_list[i].sender = msg.SenderConnection;
+                            player_list[i].myName = readName;
+                            switch (steamID) // TODO: read from external file
                             {
                                 case 76561198384352240:
-                                    playerList[i].isMod = true;
+                                    player_list[i].isMod = true;
                                     break;
                                 case 76561198218282413:
-                                    playerList[i].isMod = true;
+                                    player_list[i].isMod = true;
                                     break;
                                 case 76561198162222086:
-                                    playerList[i].isMod = true;
+                                    player_list[i].isMod = true;
                                     break;
                                 case 76561198323046172:
-                                    playerList[i].isMod = true;
+                                    player_list[i].isMod = true;
                                     break;
                                 default:
-                                    playerList[i].isFounder = true;
+                                    player_list[i].isFounder = true;
                                     break;
                             }
                             sendClientMatchInfo2Connect(i, msg.SenderConnection);
@@ -487,28 +487,28 @@ namespace WC.SARS
                     //no longer needed, but is useful.
                     if (DEBUG_ENABLED)
                     {
-                        for (int i = 0; i < playerList.Length; i++)
+                        for (int i = 0; i < player_list.Length; i++)
                         {
-                            if (playerList[i] != null)
+                            if (player_list[i] != null)
                             {
-                                Logger.Basic($"Player ID For Match: {playerList[i].assignedID}");
-                                Logger.Basic($"Avatar/Character ID: {playerList[i].avatarID}");
-                                Logger.Basic($"Umbrella ID: {playerList[i].umbrellaID}");
-                                Logger.Basic($"Gravestone ID: {playerList[i].gravestoneID}");
-                                Logger.Basic($"Death Explosion ID: {playerList[i].deathExplosionID}");
-                                Logger.Basic($"Emote ID: {playerList[i].emoteIDs}");
-                                Logger.Basic($"Hat ID: {playerList[i].hatID}");
-                                Logger.Basic($"Glasses ID: {playerList[i].glassesID}");
-                                Logger.Basic($"Beard ID: {playerList[i].beardID}");
-                                Logger.Basic($"Clothes ID: {playerList[i].clothesID}");
-                                Logger.Basic($"Melee Weapon ID: {playerList[i].meleeID}");
-                                Logger.Basic($"Gun-Skin-by-Index-ID: {playerList[i].gunSkinIndexByIDAmmount}");
-                                //Logger.Basic($"Unsure 1: {playerList[i].UNKNOWN_BYTE}");
-                                //Logger.Basic($"Unsure 2: {playerList[i].UNKNOWN_DATA}");
+                                Logger.Basic($"Player ID For Match: {player_list[i].myID}");
+                                Logger.Basic($"Avatar/Character ID: {player_list[i].avatarID}");
+                                Logger.Basic($"Umbrella ID: {player_list[i].umbrellaID}");
+                                Logger.Basic($"Gravestone ID: {player_list[i].gravestoneID}");
+                                Logger.Basic($"Death Explosion ID: {player_list[i].deathExplosionID}");
+                                Logger.Basic($"Emote ID: {player_list[i].emoteIDs}");
+                                Logger.Basic($"Hat ID: {player_list[i].hatID}");
+                                Logger.Basic($"Glasses ID: {player_list[i].glassesID}");
+                                Logger.Basic($"Beard ID: {player_list[i].beardID}");
+                                Logger.Basic($"Clothes ID: {player_list[i].clothesID}");
+                                Logger.Basic($"Melee Weapon ID: {player_list[i].meleeID}");
+                                Logger.Basic($"Gun-Skin-by-Index-ID: {player_list[i].gunSkinIndexByIDAmmount}");
+                                //Logger.Basic($"Unsure 1: {player_list[i].UNKNOWN_BYTE}");
+                                //Logger.Basic($"Unsure 2: {player_list[i].UNKNOWN_DATA}");
                             }
                             else { break; }
                         }
-                    }
+                    }*/
                     break;
 
                 case 5:
@@ -519,9 +519,9 @@ namespace WC.SARS
                     short plr = getPlayerID(msg.SenderConnection);
                     NetOutgoingMessage sendEject = server.CreateMessage();
                     sendEject.Write((byte)8);
-                    sendEject.Write(playerList[plr].assignedID);
-                    sendEject.Write(playerList[plr].position_X);
-                    sendEject.Write(playerList[plr].position_Y);
+                    sendEject.Write(player_list[plr].myID);
+                    sendEject.Write(player_list[plr].position_X);
+                    sendEject.Write(player_list[plr].position_Y);
                     sendEject.Write(true);
                     server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
                     break;
@@ -532,16 +532,16 @@ namespace WC.SARS
                     float actY = msg.ReadFloat();
                     byte currentwalkMode = msg.ReadByte();
 
-                    for (short i = 0; i < playerList.Length; i++)
+                    for (short i = 0; i < player_list.Length; i++)
                     {
-                        if ((playerList[i] != null))
+                        if ((player_list[i] != null))
                         {
-                            if (playerList[i].sender == msg.SenderConnection)
+                            if (player_list[i].sender == msg.SenderConnection)
                             {
-                                playerList[i].position_X = actX;
-                                playerList[i].position_Y = actY;
-                                playerList[i].mouseAngle = mAngle;
-                                playerList[i].currWalkMode = currentwalkMode;
+                                player_list[i].position_X = actX;
+                                player_list[i].position_Y = actY;
+                                player_list[i].mouseAngle = mAngle;
+                                player_list[i].currWalkMode = currentwalkMode;
                                 break;
                             }
                         }
@@ -641,9 +641,12 @@ namespace WC.SARS
                             $"\nhitDestruct: {didHitADestruct}\nDestruct X: {destructCollisionPoint_X}\nDestruct Y: {destructCollisionPoint_Y}\nAttack ID: {attackID}\nArrayLength: {sendProjectileAnglesArrayLength}\nProjectile Inst Angle: {projectileInstAngle}\nProjectile ID: {projectileID}\nDid Hit? {didHit}");
                     }*/
                     break;
+                case 18:
+                    serverSendPlayerShoteded(msg);
+                    break;
                 case 21:
                     //Writes 21 > Write(int:lootID) > Write(byte:slotIndex) [EDIT 2/3/22: what? lol]
-                    Player currPlayer = playerList[getPlayerArrayIndex(msg.SenderConnection)];
+                    Player currPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     short item = (short)msg.ReadInt32();
                     byte index = msg.ReadByte();
                     if (DEBUG_ENABLED) { Logger.Basic($"Loot ID: {item}\nSlotIndex: {index}"); }
@@ -664,9 +667,9 @@ namespace WC.SARS
                     }
                     NetOutgoingMessage testMessage = server.CreateMessage();
                     testMessage.Write((byte)22);
-                    testMessage.Write(currPlayer.assignedID); //player
+                    testMessage.Write(currPlayer.myID); //player
                     testMessage.Write((int)item); // the item
-                                                  //testMessage.Write(playerList[i].equip1);
+                                                  //testMessage.Write(player_list[i].equip1);
                     testMessage.Write(index);
                     testMessage.Write((byte)4); //Forced Rarity -- seems only applicable in the shooting gallery
                     server.SendToAll(testMessage, NetDeliveryMethod.ReliableUnordered);
@@ -712,11 +715,11 @@ namespace WC.SARS
                     short enteredVehicleID = msg.ReadInt16();
                     NetOutgoingMessage enterVehicle = server.CreateMessage();
                     enterVehicle.Write((byte)56);
-                    enterVehicle.Write(playerList[vehPlr].assignedID); //sent ID
+                    enterVehicle.Write(player_list[vehPlr].myID); //sent ID
                     enterVehicle.Write(enteredVehicleID); //vehicle ID
-                    enterVehicle.Write(playerList[vehPlr].position_X); //X
-                    enterVehicle.Write(playerList[vehPlr].position_Y); //Y
-                    playerList[vehPlr].vehicleID = enteredVehicleID;
+                    enterVehicle.Write(player_list[vehPlr].position_X); //X
+                    enterVehicle.Write(player_list[vehPlr].position_Y); //Y
+                    player_list[vehPlr].vehicleID = enteredVehicleID;
                     server.SendToAll(enterVehicle, NetDeliveryMethod.ReliableOrdered);
                     break;
 
@@ -725,11 +728,11 @@ namespace WC.SARS
                     short vehPlrEx = getPlayerArrayIndex(msg.SenderConnection);
                     NetOutgoingMessage exitVehicle = server.CreateMessage();
                     exitVehicle.Write((byte)58);
-                    exitVehicle.Write(playerList[vehPlrEx].assignedID); //sent ID
+                    exitVehicle.Write(player_list[vehPlrEx].myID); //sent ID
                     exitVehicle.Write(msg.ReadInt16()); //vehicle ID
-                    exitVehicle.Write(playerList[vehPlrEx].position_X); //X
-                    exitVehicle.Write(playerList[vehPlrEx].position_Y); //Y
-                    playerList[vehPlrEx].vehicleID = -1;
+                    exitVehicle.Write(player_list[vehPlrEx].position_X); //X
+                    exitVehicle.Write(player_list[vehPlrEx].position_Y); //Y
+                    player_list[vehPlrEx].vehicleID = -1;
                     server.SendToAll(exitVehicle, NetDeliveryMethod.ReliableOrdered); //yes it's that simple
                     break;
                 //someone started healing...
@@ -783,8 +786,8 @@ namespace WC.SARS
                     server.SendToAll(emoteMsg, NetDeliveryMethod.ReliableUnordered);
 
                     //update player info rq
-                    playerList[ePlayerIndex].position_X = msg.ReadFloat();
-                    playerList[ePlayerIndex].position_Y = msg.ReadFloat();
+                    player_list[ePlayerIndex].position_X = msg.ReadFloat();
+                    player_list[ePlayerIndex].position_Y = msg.ReadFloat();
                     break;
 
                 case 72: // CLIENT_DESTORY_DOODAD
@@ -870,6 +873,51 @@ namespace WC.SARS
             Logger.Success($"Server sent {client.RemoteEndPoint} their accept message!");
         }
 
+        private void serverHandlePlayerConnection(NetIncomingMessage msg)
+        {
+            //Read the player's character info and stuff
+            ulong steamID = msg.ReadUInt64(); //not in base
+            string steamName = msg.ReadString();//not in base -- must be added in
+            short charID = msg.ReadInt16();
+            short umbrellaID = msg.ReadInt16();
+            short graveID = msg.ReadInt16();
+            short deathEffectID = msg.ReadInt16();
+            short[] emoteIDs =
+            {
+                msg.ReadInt16(),
+                msg.ReadInt16(),
+                msg.ReadInt16(),
+                msg.ReadInt16(),
+                msg.ReadInt16(),
+                msg.ReadInt16(), };
+            short hatID = msg.ReadInt16();
+            short glassesID = msg.ReadInt16();
+            short beardID = msg.ReadInt16();
+            short clothesID = msg.ReadInt16();
+            short meleeID = msg.ReadInt16();
+            byte gunSkinCount = msg.ReadByte();
+            short[] gunskinGunID = new short[gunSkinCount];
+            byte[] gunSkinIndex = new byte[gunSkinCount];
+            for (int l = 0; l < gunSkinCount; l++)
+            {
+                gunskinGunID[l] = msg.ReadInt16();
+                gunSkinIndex[l] = msg.ReadByte();
+            }
+
+            //find an empty slot
+            sortPlayersListNull(); //need to find an empty i
+            //TODO :: make sure this finds the REAL non-existent value
+            for (short i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] == null)
+                {
+                    player_list[i] = new Player(i, charID, umbrellaID, graveID, deathEffectID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, gunSkinCount, gunskinGunID, gunSkinIndex, steamName, msg.SenderConnection);
+                    sendClientMatchInfo2Connect(i, msg.SenderConnection);
+                    break;
+                }
+            }
+        }
+
         //message 3 > << message 4 >> --still needs working ------ make seed random
         private void sendClientMatchInfo2Connect(short sendingID, NetConnection receiver)
         {
@@ -904,9 +952,9 @@ namespace WC.SARS
         {
             NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
             sendPlayerPosition.Write((byte)10);
-            for (byte i = 0; i < playerList.Length; i++)
+            for (byte i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] == null)
+                if (player_list[i] == null)
                 {
                     sendPlayerPosition.Write(i); // Ammount of times to loop (for amount of players, you know?
                     break;
@@ -914,69 +962,114 @@ namespace WC.SARS
             }
 
             // loop through the list of all of the players in the match \\
-            for (short i = 0; i < playerList.Length; i++)
+            for (short i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] != null)
+                if (player_list[i] != null)
                 {
-                    Logger.Header($"Sending << playerList[{i}] >>");
+                    Logger.Header($"Sending << player_list[{i}] >>");
                     //For Loop Start // this byte may be a list of all players. I'm not sure though!
                     sendPlayerPosition.Write(i); //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(playerList[i].avatarID); //charIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].umbrellaID); //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].gravestoneID); //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].deathExplosionID); //explosionIndex [SHORT]
-                    for (int j = 0; j < playerList[i].emoteIDs.Length; j++)
+                    sendPlayerPosition.Write(player_list[i].charID); //charIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].umbrellaID); //umbrellaIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].gravestoneID); //gravestoneIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].deathEffectID); //explosionIndex [SHORT]
+                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
                     {
                         Logger.Warn("Loop Ammount: " + j);
-                        sendPlayerPosition.Write(playerList[i].emoteIDs[j]); //emoteIndex [SHORT]
+                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
                     }
-                    sendPlayerPosition.Write(playerList[i].hatID); //hatIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].glassesID); //glassesIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].beardID); //beardIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].clothesID); //clothesIndex [SHORT]
-                    sendPlayerPosition.Write(playerList[i].meleeID); //meleeIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
 
                     //Really Confusing Loop
-                    sendPlayerPosition.Write(playerList[i].gunSkinIndexByIDAmmount);
-                    for (byte l = 0; l < playerList[i].gunSkinIndexByIDAmmount; l++)
+                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
+                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
                     {
-                        sendPlayerPosition.Write(playerList[i].gunSkinKeys[l]); //Unknown Key
-                        sendPlayerPosition.Write(playerList[i].gunSkinIndexes[l]); //Unknown Value
+                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
+                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
                     }
 
                     //Positioni?
-                    sendPlayerPosition.Write(playerList[i].position_X);
-                    sendPlayerPosition.Write(playerList[i].position_Y);
+                    sendPlayerPosition.Write(player_list[i].position_X);
+                    sendPlayerPosition.Write(player_list[i].position_Y);
 
                     //sendPlayerPosition.Write((float)508.7); //x2
                     //sendPlayerPosition.Write((float)496.7); //y2
-                    sendPlayerPosition.Write(playerList[i].myName); //playername
+                    sendPlayerPosition.Write(player_list[i].myName); //playername
 
-                    sendPlayerPosition.Write(playerList[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                    sendPlayerPosition.Write(playerList[i].equip1); //equip -- int16
-                    sendPlayerPosition.Write(playerList[i].equip2); //equip2 - int16
-                    sendPlayerPosition.Write(playerList[i].equip1_rarity); // equip rarty byte
-                    sendPlayerPosition.Write(playerList[i].equip2_rarity); // equip rarity 2 -- byte
-                    sendPlayerPosition.Write(playerList[i].curEquipIndex); // current equip index -- byte
+                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
+                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
+                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
+                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
+                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
+                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
                     /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
                      */
-                    sendPlayerPosition.Write(playerList[i].isDev); //isDev
-                    sendPlayerPosition.Write(playerList[i].isMod); //isMod
-                    sendPlayerPosition.Write(playerList[i].isFounder); //isFounder
+                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
+                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
+                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
                     sendPlayerPosition.Write((short)450); //accLvl -- short
                     sendPlayerPosition.Write((byte)1); //b6 -- not too sure, but normal byte
                     sendPlayerPosition.Write((short)25); //list of something gets added...
 
                 }
-                else { Logger.Warn($"playerList[{i}] is null. Breakout time. (sure hope {i+1}, {i+2}, {i+3}... is null as well :])"); break; }// break out of loop
+                else { Logger.Success($"breakout! count: {i}"); break; }// break out of loop
             }
             Logger.Success("Going to be sending new player all other player positions.");
             server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced); // CHANGED FROM BOTTOM TO THIS IDK WHAT IT DOES
                                                                                        //server.SendMessage(sendPlayerPosition, msg.SenderConnection, NetDeliveryMethod.UnreliableSequenced);
         }
 
-        //25 > 26/94/106
+
+        //18 > 19
+        private void serverSendPlayerShoteded(NetIncomingMessage message)
+        {
+            /*
+            netOutgoingMessage.Write(targetPlayerID);
+            netOutgoingMessage.Write(weaponID);
+            netOutgoingMessage.Write(optionalProjectileID);
+            netOutgoingMessage.Write(hitPosition.x);
+            netOutgoingMessage.Write(hitPosition.y);*/
+
+            short hitPlayerID = message.ReadInt16();
+            short wepID = message.ReadInt16();
+            short projID = message.ReadInt16();
+            float hitX = message.ReadFloat();
+            float hitY = message.ReadFloat();
+
+            NetOutgoingMessage msg = server.CreateMessage();
+            msg.Write((byte)19);
+            msg.Write(getPlayerID(message.SenderConnection));
+            msg.Write(hitPlayerID);
+            msg.Write(projID);
+            msg.Write((byte)0);
+            msg.Write((short)-1);
+
+            server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
+
+            /*
+             * short fromPlayerID = msg.ReadInt16();
+             * short toPlayerID = msg.ReadInt16();
+             * short optionalProjectileID = msg.ReadInt16();
+             * byte dinkedArmorInitialAmount = msg.ReadByte();
+             * short num17 = msg.ReadInt16();
+             * byte vehicleHP = 0;
+                if (num17 >= 0)
+                    {
+                        vehicleHP = msg.ReadByte();
+                        }
+					if (GameServerManager.responderGame != null)
+					{
+					GameServerManager.responderGame.GameServerSentServerAttackHit(fromPlayerID, toPlayerID, optionalProjectileID, dinkedArmorInitialAmount, num17, vehicleHP);
+				return;
+			}*/
+        }
+
+        //25 > 26/94/106 -- is A HUGE mess
         private void serverHandleChatMessage(NetIncomingMessage message)
         {
             //this can either be a command, or an actual chat message. let's find out if it was a command
@@ -987,7 +1080,7 @@ namespace WC.SARS
                 string responseMsg = "command executed... no info given...";
                 short id, id2, amount;
                 float cPosX, cPosY;
-                Logger.Warn($"Player {playerList[getPlayerArrayIndex(message.SenderConnection)].assignedID} ({playerList[getPlayerArrayIndex(message.SenderConnection)].myName}) used {command[0]}");
+                Logger.Warn($"Player {player_list[getPlayerArrayIndex(message.SenderConnection)].myID} ({player_list[getPlayerArrayIndex(message.SenderConnection)].myName}) used {command[0]}");
                 switch (command[0])
                 {
                     case "/help":
@@ -1017,7 +1110,7 @@ namespace WC.SARS
                                 case "3":
 
                                     break;*/
-                                default:
+            default:
                                     responseMsg = $"Invalid help entry '{command[1]}'.\nPlease see '/help' for a list of usable commands.";
                                     break;
                             }
@@ -1043,11 +1136,11 @@ namespace WC.SARS
                             {
                                 id = short.Parse(command[1]);
                                 amount = short.Parse(command[2]);
-                                if (amount - playerList[id].hp <= 0)
+                                if (amount - player_list[id].hp <= 0)
                                 {
-                                    playerList[id].hp += (byte)amount;
-                                    if (playerList[id].hp > 100) { playerList[id].hp = 100; }
-                                    responseMsg = $"Healed player {id} ({playerList[id].myName} by {amount})";
+                                    player_list[id].hp += (byte)amount;
+                                    if (player_list[id].hp > 100) { player_list[id].hp = 100; }
+                                    responseMsg = $"Healed player {id} ({player_list[id].myName} by {amount})";
                                 }
                                 else
                                 {
@@ -1069,8 +1162,8 @@ namespace WC.SARS
                                 id = short.Parse(command[1]);
                                 amount = short.Parse(command[2]);
                                 if (amount > 100) { amount = 100; }
-                                playerList[id].hp = (byte)amount;
-                                responseMsg = $"Set player {id} ({playerList[id].myName})'s health to {amount}";
+                                player_list[id].hp = (byte)amount;
+                                responseMsg = $"Set player {id} ({player_list[id].myName})'s health to {amount}";
                             }
                             catch
                             {
@@ -1093,9 +1186,9 @@ namespace WC.SARS
                                 forcetoPos.Write(cPosX); forcetoPos.Write(cPosY); forcetoPos.Write(false);
                                 server.SendToAll(forcetoPos, NetDeliveryMethod.ReliableOrdered);
 
-                                playerList[id].position_X = cPosX;
-                                playerList[id].position_Y = cPosY;
-                                responseMsg = $"Moved player {id} ({playerList[id].myName}) to ({cPosX}, {cPosY}). ";
+                                player_list[id].position_X = cPosX;
+                                player_list[id].position_Y = cPosY;
+                                responseMsg = $"Moved player {id} ({player_list[id].myName}) to ({cPosX}, {cPosY}). ";
                             }
                             catch
                             {
@@ -1115,12 +1208,12 @@ namespace WC.SARS
 
                                 NetOutgoingMessage forcetoPos = server.CreateMessage();
                                 forcetoPos.Write((byte)8); forcetoPos.Write(id);
-                                forcetoPos.Write(playerList[id2].position_X); forcetoPos.Write(playerList[id2].position_Y); forcetoPos.Write(false);
+                                forcetoPos.Write(player_list[id2].position_X); forcetoPos.Write(player_list[id2].position_Y); forcetoPos.Write(false);
                                 server.SendToAll(forcetoPos, NetDeliveryMethod.ReliableOrdered);
 
-                                playerList[id].position_X = playerList[id2].position_X;
-                                playerList[id].position_Y = playerList[id2].position_Y;
-                                responseMsg = $"Moved player {id} ({playerList[id].myName}) to player {id2} ({playerList[id2].myName}). ";
+                                player_list[id].position_X = player_list[id2].position_X;
+                                player_list[id].position_Y = player_list[id2].position_Y;
+                                responseMsg = $"Moved player {id} ({player_list[id].myName}) to player {id2} ({player_list[id2].myName}). ";
                             }
                             catch
                             {
@@ -1259,15 +1352,15 @@ namespace WC.SARS
                             {
                                 if (!(forceID < 0) && !(forceID > 64))
                                 {
-                                    for(int fl = 0; fl < playerList.Length; fl++)
+                                    for(int fl = 0; fl < player_list.Length; fl++)
                                     {
-                                        if (playerList[fl] != null && playerList[fl]?.assignedID == forceID)
+                                        if (player_list[fl] != null && player_list[fl]?.myID == forceID)
                                         {
                                             NetOutgoingMessage sendEject = server.CreateMessage();
                                             sendEject.Write((byte)8);
-                                            sendEject.Write(playerList[fl].assignedID);
-                                            sendEject.Write(playerList[fl].position_X);
-                                            sendEject.Write(playerList[fl].position_Y);
+                                            sendEject.Write(player_list[fl].myID);
+                                            sendEject.Write(player_list[fl].position_X);
+                                            sendEject.Write(player_list[fl].position_Y);
                                             sendEject.Write(true);
                                             server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
                                             responseMsg = "Command executed successfully?";
@@ -1316,12 +1409,12 @@ namespace WC.SARS
         //got 27 > send 28
         private void serverSendSlotUpdate(NetConnection snd, byte sentSlot)
         {
-            Player plr = playerList[getPlayerArrayIndex(snd)];
+            Player plr = player_list[getPlayerArrayIndex(snd)];
             plr.activeSlot = sentSlot;
 
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)28);
-            msg.Write(plr.assignedID);
+            msg.Write(plr.myID);
             msg.Write(sentSlot);
             server.SendToAll(msg, NetDeliveryMethod.ReliableUnordered);
         }
@@ -1371,7 +1464,7 @@ namespace WC.SARS
         //send 51
         private void serverSendCoconutEaten(NetIncomingMessage message)
         {
-            Player client = playerList[getPlayerArrayIndex(message.SenderConnection)];
+            Player client = player_list[getPlayerArrayIndex(message.SenderConnection)];
             if (client.hp < 200)
             {
                 client.hp += 5;
@@ -1414,10 +1507,10 @@ namespace WC.SARS
             netOutgoingMessage.Write(60);
             netOutgoingMessage.Write(targetPlayerID);
             netOutgoingMessage.Write(speed);*/
-            Player plrA = playerList[getPlayerArrayIndex(message.SenderConnection)];
+            Player plrA = player_list[getPlayerArrayIndex(message.SenderConnection)];
             NetOutgoingMessage vehicleHit = server.CreateMessage();
             vehicleHit.Write((byte)61); //Message #61
-            vehicleHit.Write(plrA.assignedID); //player who hit
+            vehicleHit.Write(plrA.myID); //player who hit
             vehicleHit.Write(message.ReadInt16()); //player who GOT hit
             //TODO: redo player list so that can actually figure out how to find whether or not palyer died
             if (message.ReadFloat() > 50f){
@@ -1452,10 +1545,10 @@ namespace WC.SARS
         //send 63
         private void serverSendPlayerHamsterballBounce(NetIncomingMessage message)
         {
-            Player plr = playerList[getPlayerArrayIndex(message.SenderConnection)];
+            Player plr = player_list[getPlayerArrayIndex(message.SenderConnection)];
             NetOutgoingMessage smsg = server.CreateMessage();
             smsg.Write((byte)63);
-            smsg.Write(plr.assignedID);
+            smsg.Write(plr.myID);
             smsg.Write(plr.vehicleID);
             server.SendToAll(smsg, NetDeliveryMethod.ReliableUnordered);
         }
@@ -1483,14 +1576,14 @@ namespace WC.SARS
         //client[47] > server[48] -- pretty much a copy of sendingTape and stuff... info inside btw...
         private void serverSendPlayerStartedHealing(NetConnection sender, float posX, float posY)
         {
-            Player plr = playerList[getPlayerArrayIndex(sender)];
+            Player plr = player_list[getPlayerArrayIndex(sender)];
             plr.position_X = posX;
             plr.position_Y = posY;
             plr.isHealing = true;
 
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)48);
-            msg.Write(plr.assignedID);
+            msg.Write(plr.myID);
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
             /* so this whole thing only tells the person/everyone that the person who sent this whole message has
              * started healing. their game won't update their hp, juice count, tape, how much got taped, etc.
@@ -1523,29 +1616,61 @@ namespace WC.SARS
         //client[98] > server[99] -- started taping
         private void serverSendPlayerStartedTaping(NetConnection sender, float posX, float posY)
         {
-            Player plr = playerList[getPlayerArrayIndex(sender)];
+            Player plr = player_list[getPlayerArrayIndex(sender)];
             plr.position_X = posX;
             plr.position_Y = posY;
             plr.isTaping = true;
 
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)99);
-            msg.Write(plr.assignedID);
+            msg.Write(plr.myID);
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
 
         
+        private void sortPlayersListNull()
+        {
+            Player[] temp_plrlst = new Player[player_list.Length]; //yeah I mean I think the game caps it at 64 but you know it's fine
+            byte newIndex = 0;
+            for (byte i = 0; i < player_list.Length; i++)
+            {
+                if(player_list[i] != null)
+                {
+                    temp_plrlst[newIndex] = player_list[i];
+                    newIndex++;
+                }
+            }
+            player_list = temp_plrlst;
+        }
+        private void sortPlayersListIDs()
+        {
+            Player[] temp_plrlst = new Player[player_list.Length];;
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                for(int j = i+1; j < player_list.Length; j++)
+                {
+                    if (player_list[i]?.myID < player_list[j]?.myID)
+                    {
+                        temp_plrlst[i] = player_list[i];
+                        player_list[i] = player_list[j];
+                        player_list[j] = temp_plrlst[i];
+                    }
+                }
+            }
+            player_list = temp_plrlst;
+        }
+
         //Helper Functions to get playerID
         private short getPlayerID(NetConnection thisSender)
         {
             short id = -1;
-            for (byte i = 0; i < playerList.Length; i++)
+            for (byte i = 0; i < player_list.Length; i++)
             {
-                if (playerList[i] != null)
+                if (player_list[i] != null)
                 {
-                    if (playerList[i].sender == thisSender)
+                    if (player_list[i].sender == thisSender)
                     {
-                        id = playerList[i].assignedID;
+                        id = player_list[i].myID;
                         break;
                     }
                 }
@@ -1555,21 +1680,20 @@ namespace WC.SARS
         private short getPlayerArrayIndex(NetConnection thisSender)
         {
             short id = -1;
-            for (id = 0;  id < playerList.Length; id++)
+            for (id = 0;  id < player_list.Length; id++)
             {
-                if (playerList[id] != null)
+                if (player_list[id] != null)
                 {
-                    if (playerList[id].sender == thisSender)
+                    if (player_list[id].sender == thisSender)
                     {
                         //Logger.Header($"Theoretical returned ID should be: {id}");
                         //Logger.Header($"Returned ID will be: {id}");
                         return id;
-                        //break;
                     }
                 }
             }
             Logger.Failure("NO PLAYER WAS FOUND WITH THE GIVEN SENDER ADDRESS");
-            return -2;
+            return -1;
             //Logger.Header($"Returned ID will be: {id}");
             //return id;
         }
