@@ -8,22 +8,22 @@ namespace WC.SARS
     class Player
     {
         // Make Some Empty Variables! \\
-        public short assignedID; // Server Assigns this
+        public short myID; // Server Assigns this
         public NetConnection sender; // Server Also Assigns this
         public string myName = "愛子";
-        public short avatarID; // Character & Avatar
+        public short charID; // Character & Avatar
         public short umbrellaID; // Umbrella
         public short gravestoneID; // Gravestone
-        public short deathExplosionID; // Death Explosion
+        public short deathEffectID; // Death Explosion
         public short[] emoteIDs; // Emote List (Length of 6; short; array)
         public short hatID; // Hat
         public short glassesID; // Glasses
         public short beardID; // Beard
         public short clothesID; // Clothes
         public short meleeID; // Melee
-        public byte gunSkinIndexByIDAmmount; // Gunskin1
-        public short[] gunSkinKeys; // Gunskin2 IDK
-        public byte[] gunSkinIndexes; // Gunskin3 IDK
+        public byte gunSkinCount; // Gunskin1
+        public short[] gunskinKey; // Gunskin2 IDK //key
+        public byte[] gunskinValue; // Gunskin3 IDK //value
 
         //Updated Regularly...
         public float mouseAngle = 0f;
@@ -59,27 +59,25 @@ namespace WC.SARS
         public bool reloading = false;
         public bool alive = true;
 
-        //ya
-        //this constructor thingy hasn't been updated in a while... maybe work on it at some point :3
-        public Player(short assignID, short charID, short parasollID, short graveID, short deathEffectID, short[] danceIDs, short hatID, short glassID, short brdID, short clothingID, short meleeID, byte gunbyID, short[] indexLists, byte[] values)
+        //constructor edited: 2/24/22
+        public Player(short assignedID, short characterID, short parasollID, short gravestoneID, short deathExplosionID, short[] emotes, short hatID, short glassesID, short beardID, short clothingID, short meleeID, byte skinCount, short[] skinKeys, byte[] skinValues, string thisName, NetConnection senderAddress)
         {
-            this.assignedID = assignID;
-            this.avatarID = charID;
+            this.myName = thisName;
+            this.myID = assignedID;
+            this.charID = characterID;
             this.umbrellaID = parasollID;
-            this.gravestoneID = graveID;
-            this.deathExplosionID = deathEffectID;
-            this.emoteIDs = danceIDs;
+            this.gravestoneID = gravestoneID;
+            this.deathEffectID = deathExplosionID;
+            this.emoteIDs = emotes;
             this.hatID = hatID;
-            this.glassesID = glassID;
-            this.beardID = brdID;
+            this.glassesID = glassesID;
+            this.beardID = beardID;
             this.clothesID = clothingID;
             this.meleeID = meleeID;
-
-            //the first one I know what it might be by name, but last two not too sure take a better look.
-            this.gunSkinIndexByIDAmmount = gunbyID;
-            this.gunSkinKeys = indexLists;
-            this.gunSkinIndexes = values;
-
+            this.gunSkinCount = skinCount;
+            this.gunskinKey = skinKeys;
+            this.gunskinValue= skinValues;
+            this.sender = senderAddress;
         }
     }
 }
