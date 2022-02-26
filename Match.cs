@@ -531,12 +531,12 @@ namespace WC.SARS
                     sendPlayerCharacters();
                     break;
                 case 7:
-                    short plr = getPlayerID(msg.SenderConnection);
+                    Player ejectedPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     NetOutgoingMessage sendEject = server.CreateMessage();
                     sendEject.Write((byte)8);
-                    sendEject.Write(player_list[plr].myID);
-                    sendEject.Write(player_list[plr].position_X);
-                    sendEject.Write(player_list[plr].position_Y);
+                    sendEject.Write(ejectedPlayer.myID);
+                    sendEject.Write(ejectedPlayer.position_X);
+                    sendEject.Write(ejectedPlayer.position_Y);
                     sendEject.Write(true);
                     server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
                     break;
@@ -560,10 +560,7 @@ namespace WC.SARS
                                 break;
                             }
                         }
-                        else
-                        {
-                            break;
-                        }
+                        else { break;}
                     }
                     //annoying debug section
                     if (ANOYING_DEBUG1)
@@ -616,45 +613,6 @@ namespace WC.SARS
                         }
                     }
                     server.SendToAll(plrShot, NetDeliveryMethod.ReliableSequenced);
-
-                    /* using this as a base for later...
-                    short weaponID = msg.ReadInt16(); //short -- WeaponId
-                    byte slotIndex = msg.ReadByte();//byte -- slotIndex
-                    float aimAngle = msg.ReadFloat();//float (myver) -- aimAngle
-                    float spawnPoint_X = msg.ReadFloat();//float -- spawnPoint.X
-                    float spawnPoint_Y = msg.ReadFloat();//float -- spawnPoint.Y
-                    bool shotPointValid = msg.ReadBoolean();//bool -- shotPointValid
-                    bool didHitADestruct = msg.ReadBoolean();//bool -- didHitDestructible
-                    short destructCollisionPoint_X = 0; //short -- destructCollisionPoint.X
-                    short destructCollisionPoint_Y = 0; //short -- destruct.CollisionPoint.y
-                    if (didHitADestruct)
-                    {
-                        destructCollisionPoint_X = msg.ReadInt16();
-                        destructCollisionPoint_Y = msg.ReadInt16();
-                    }
-                    short attackID = msg.ReadInt16();//short -- attackID
-                    byte sendProjectileAnglesArrayLength = msg.ReadByte();//byte -- projectileAngles.Length
-                    float projectileInstAngle = 0;
-                    short projectileID = 0;
-                    bool didHit = false;
-                    if (sendProjectileAnglesArrayLength > 0)
-                    {
-                        for (byte i = 0; i < sendProjectileAnglesArrayLength; i++)
-                        {
-                            projectileInstAngle = msg.ReadFloat();
-                            Logger.Basic($"Projectile ID {i}.Angle: {projectileInstAngle}");
-                            projectileID = msg.ReadInt16();
-                            Logger.Basic($"Projectile ID {i}.ReadID: {projectileID}");
-                            didHit = msg.ReadBoolean();
-                            Logger.Basic($"Projectile ID {i}.didHit: {didHit}");
-                        }
-                    }
-
-                    if (DEBUG_ENABLED)
-                    {
-                        Logger.Basic($"WeaponID: {weaponID}\nSlotIndex: {slotIndex}\naimAngle: {aimAngle}\nSpawn X: {spawnPoint_X}\nSpawn Y: {spawnPoint_Y}\nValid? {shotPointValid}" +
-                            $"\nhitDestruct: {didHitADestruct}\nDestruct X: {destructCollisionPoint_X}\nDestruct Y: {destructCollisionPoint_Y}\nAttack ID: {attackID}\nArrayLength: {sendProjectileAnglesArrayLength}\nProjectile Inst Angle: {projectileInstAngle}\nProjectile ID: {projectileID}\nDid Hit? {didHit}");
-                    }*/
                     break;
                 case 18:
                     serverSendPlayerShoteded(msg);
@@ -684,7 +642,6 @@ namespace WC.SARS
                     testMessage.Write((byte)22);
                     testMessage.Write(currPlayer.myID); //player
                     testMessage.Write((int)item); // the item
-                                                  //testMessage.Write(player_list[i].equip1);
                     testMessage.Write(index);
                     testMessage.Write((byte)4); //Forced Rarity -- seems only applicable in the shooting gallery
                     server.SendToAll(testMessage, NetDeliveryMethod.ReliableUnordered);
