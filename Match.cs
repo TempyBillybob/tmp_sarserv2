@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Lidgren.Network;
 using System.Threading;
 
@@ -10,6 +11,7 @@ namespace WC.SARS
         private NetPeerConfiguration config;
         public NetServer server;
         public Player[] player_list;
+        private List<short> availableIDs;
         private Thread updateThread;
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
         private int slpTime, prevTime;
@@ -31,6 +33,9 @@ namespace WC.SARS
             isSorting = false;
             isSorted = true;
             player_list = new Player[64];
+            availableIDs = new List<short>(64);
+            for (short i = 0; i < 64; i++) { availableIDs.Add(i); }
+
             timeUntilStart = 90.00;
             gasAdvanceTimer = -1;
             prevTime = DateTime.Now.Second;
@@ -79,8 +84,9 @@ namespace WC.SARS
                                             playerLeft.Write((byte)46);
                                             playerLeft.Write(player_list[plr].myID);
                                             playerLeft.Write(false); //isAdminGhosting -- not quite sure how to determine this
-                                            player_list[plr] = null;
                                             server.SendToAll(playerLeft, NetDeliveryMethod.ReliableOrdered);
+                                            availableIDs.Insert(0, player_list[plr].myID);
+                                            player_list[plr] = null;
                                             Logger.Success("Player Disconnected and dealt with successfully.");
                                             isSorted = false;
                                     }
@@ -919,9 +925,10 @@ namespace WC.SARS
             for (short i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
-                {
-                    player_list[i] = new Player(i, charID, umbrellaID, graveID, deathEffectID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, gunSkinCount, gunskinGunID, gunSkinIndex, steamName, msg.SenderConnection);
-                    sendClientMatchInfo2Connect(i, msg.SenderConnection);
+                { 
+                    player_list[i] = new Player(availableIDs[0], charID, umbrellaID, graveID, deathEffectID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, gunSkinCount, gunskinGunID, gunSkinIndex, steamName, msg.SenderConnection);
+                    sendClientMatchInfo2Connect(availableIDs[0], msg.SenderConnection);
+                    availableIDs.RemoveAt(0);
                     break;
                 }
             }
