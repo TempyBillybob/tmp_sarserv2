@@ -10,11 +10,14 @@ namespace WC.SARS
         private NetPeerConfiguration config;
         public NetServer server;
         public Player[] player_list;
-        public Thread updateThread;
+        private Thread updateThread;
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
         private int slpTime, prevTime;
         private bool matchStarted, matchFull;
+        private bool isSorting, isSorted;
         public double timeUntilStart, gasAdvanceTimer;
+
+
 
         //these get to go at some point, or never. I'm quite lazy.
         public bool DEBUG_ENABLED;
@@ -25,6 +28,8 @@ namespace WC.SARS
             slpTime = 10;
             matchStarted = false;
             matchFull = false;
+            isSorting = false;
+            isSorted = true;
             player_list = new Player[64];
             timeUntilStart = 90.00;
             gasAdvanceTimer = -1;
@@ -62,6 +67,7 @@ namespace WC.SARS
                                     acceptMsgg.Write((byte)0);
                                     acceptMsgg.Write(true);
                                     server.SendMessage(acceptMsgg, msg.SenderConnection, NetDeliveryMethod.ReliableSequenced);
+                                    isSorted = false;
                                     break;
                                 case NetConnectionStatus.Disconnected:
                                         Logger.Warn("Searching for player that disconnected.");
@@ -76,7 +82,8 @@ namespace WC.SARS
                                             player_list[plr] = null;
                                             server.SendToAll(playerLeft, NetDeliveryMethod.ReliableOrdered);
                                             Logger.Success("Player Disconnected and dealt with successfully.");
-                                        }
+                                            isSorted = false;
+                                    }
                                         else{ Logger.Failure("Well that is awfully strange. No one was found."); }
                                     break;
                                 case NetConnectionStatus.Disconnecting:
@@ -128,10 +135,10 @@ namespace WC.SARS
         private void serverUpdateThread() //where most things get updated...
         {
             Logger.Success("Server update thread started.");
-
             //lobby
             while (!matchStarted)
             {
+                if (!isSorted) { sortPlayersListNull(); }
                 if (player_list[player_list.Length - 1] != null && !matchFull)
                 {
                     matchFull = true;
@@ -156,6 +163,7 @@ namespace WC.SARS
             //main game
             while (matchStarted)
             {
+                if (!isSorted) { sortPlayersListNull(); }
                 //updating player info to all people in the match
                 updateEveryoneOnPlayerPositions();
                 updateEveryoneOnPlayerInfo();
@@ -215,23 +223,29 @@ namespace WC.SARS
         }
         private void updateEveryoneOnPlayerInfo()
         {
+            /* The "correct" name for this is something like "Player HP/Armor/Move-Mode Change".
+             * So, this should really only happen when one of those things are updated.
+             * However, movemode should constantly be changing (super jump rolling for faster movement).
+             * I think having it constantly check for this stuff is ok for right now.
+             */
+
             NetOutgoingMessage msg = server.CreateMessage();
+            short listL;
             msg.Write((byte)45); //b == 45
-            for (byte i = 0; i < player_list.Length; i++)
+
+            //TODO: find more methods that want to only loop until hitting a null. make function that finds playerList length.
+            for (listL = 0; listL < player_list.Length; listL++)
             {
-                if (player_list[i] == null)
+                if (player_list[listL] == null)
                 {
-                    msg.Write(i);
-                    //unfortunately the amount of times the client is told to loop, is stated at the beginning.
-                    //so, we have to find the length first, then come back and go through the list again...
-                    //it isn't that it is slow, it just sucks ig.
+                    msg.Write((byte)listL); 
                     break;
                 }
             }
-
-            for (int i = 0; i < player_list.Length; i++)
+            //before checked for nulls to end loop. now should just be fine to go through the whole length of listL
+            for (int i = 0; i < listL; i++)
             {
-                if (player_list[i] != null) //just to make sure? TODO: make there be an actual reason to do this...
+                if (player_list[i] != null)
                 {
                     msg.Write(player_list[i].myID);
                     msg.Write(player_list[i].hp);
@@ -241,12 +255,7 @@ namespace WC.SARS
                     msg.Write(player_list[i].drinkies);
                     msg.Write(player_list[i].tapies);
                 }
-                else { break; }//this *may* cause some problems later
-                /*this can be stated elsewhere, but the way this is dealt with currently WILL cause problems.
-                what do we do when someone disconnects? do we just null their entry in the list?
-                well that's fine if they were the last person, but what if they are 3/6? now players 4,5, and 6 are
-                skipped over entirely now. so the way to keep it working the way it is now if to then reorder the
-                whole entire list. which kind of stinks if you ask me, but that's the result of pushing things off.*/
+                else { break; }
             }
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
@@ -266,7 +275,7 @@ namespace WC.SARS
             {
                 if (player_list[i] == null)
                 {
-                    pings.Write(i); //problematic -- what if player_list[3 && 5] are normal, but player_list[4] == null? [5] is skipped...
+                    pings.Write(i);
                     break;
                 }
             }
@@ -1630,17 +1639,28 @@ namespace WC.SARS
         
         private void sortPlayersListNull()
         {
-            Player[] temp_plrlst = new Player[player_list.Length]; //yeah I mean I think the game caps it at 64 but you know it's fine
-            byte newIndex = 0;
-            for (byte i = 0; i < player_list.Length; i++)
+            Logger.testmsg("attempting to sort playerlist...");
+            if (!isSorting)
             {
-                if(player_list[i] != null)
+                isSorting = true;
+                Player[] temp_plrlst = new Player[player_list.Length]; //yeah I mean I think the game caps it at 64 but you know it's fine
+                int newIndex = 0;
+                for (int i = 0; i < player_list.Length; i++)
                 {
-                    temp_plrlst[newIndex] = player_list[i];
-                    newIndex++;
+                    if (player_list[i] != null)
+                    {
+                        temp_plrlst[newIndex] = player_list[i];
+                        newIndex++;
+                    }
                 }
+                player_list = temp_plrlst;
+                isSorting = false;
+                isSorted = true;
+            } else
+            {
+                Logger.Warn("Attempted to sort out nulls in playerlist while sorting already in progress.\n");
+                return;
             }
-            player_list = temp_plrlst;
         }
         private void sortPlayersListIDs()
         {
@@ -1688,6 +1708,7 @@ namespace WC.SARS
                     {
                         //Logger.Header($"Theoretical returned ID should be: {id}");
                         //Logger.Header($"Returned ID will be: {id}");
+                        Logger.Success($"This sender ({thisSender.RemoteEndPoint}) is at array-index {id}, with an assigned ID of {player_list[id].myID}");
                         return id;
                     }
                 }
