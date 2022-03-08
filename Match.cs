@@ -1,25 +1,23 @@
 ﻿using System;
+using System.Threading;
 using System.Collections.Generic;
 using Lidgren.Network;
-using System.Threading;
 
 namespace WC.SARS
 {
     class Match
     {
-        
+        Random randomizer = new Random();
         private NetPeerConfiguration config;
         public NetServer server;
         public Player[] player_list;
         private List<short> availableIDs;
         private Thread updateThread;
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
-        private int slpTime, prevTime;
+        private int slpTime, prevTime, prevTimeA, matchTime;
         private bool matchStarted, matchFull;
         private bool isSorting, isSorted;
-        public double timeUntilStart, gasAdvanceTimer;
-
-
+        public double timeUntilStart, gasAdvanceTimer, gasAdvanceLength;
 
         //these get to go at some point, or never. I'm quite lazy.
         public bool DEBUG_ENABLED;
@@ -178,6 +176,8 @@ namespace WC.SARS
                 //updateServerTapeCheck(); --similar idea, about as stupid.
                 updateEveryonePingList();
                 test_SENDDUMMY();
+
+                advanceTimeAndEventCheck();
                 checkGasTime();
 
                 //sleep for a sec 
@@ -198,30 +198,23 @@ namespace WC.SARS
             NetOutgoingMessage playerUpdate = server.CreateMessage();
             playerUpdate.Write((byte)11); // Header -- Basic Update Info
 
-            //Find Length of Actual Players
-            //Logger.Warn($"player_list length: {(byte)player_list.Length}");
-            //playerUpdate.Write((byte)player_list.); // Ammount of times to loop (for amount of players, you know?
-
             for (byte i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
                 {
-                    playerUpdate.Write(i); // Ammount of times to loop (for amount of players, you know?
-                    //Logger.Header($"list length: {i}");
-                    //Logger.Warn($"sendEveryonePlayer i value: {i}");
+                    playerUpdate.Write(i);
                     break;
                 }
-                else { continue; }
             }
 
             for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] != null)
                 {
-                    playerUpdate.Write(player_list[i].myID); // may be able to simplfiy by just writing "I"
+                    playerUpdate.Write(player_list[i].myID);
                     playerUpdate.Write(player_list[i].mouseAngle);
-                    playerUpdate.Write(player_list[i].position_X); //REALLY need to fix this...
-                    playerUpdate.Write(player_list[i].position_Y); //really need to fix this as well...
+                    playerUpdate.Write(player_list[i].position_X);
+                    playerUpdate.Write(player_list[i].position_Y);
                 }
                 else { break; } //exits
             }
@@ -295,9 +288,6 @@ namespace WC.SARS
 
         private void updateServerDrinkCheck()
         {
-            //other than the attrocious constant checking, this also only heal the player by 5 each time, when in actuality
-            //the player may be able to receive health juice in any amount and the game usually lets the player heal until
-            //they are truly out of drinkies. this... this doesn't right now... so yeah...
             for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] != null)
@@ -390,12 +380,57 @@ namespace WC.SARS
                     gasAdvanceTimer = -1;
                     NetOutgoingMessage gasMoveMsg = server.CreateMessage();
                     gasMoveMsg.Write((byte)34);
-                    gasMoveMsg.Write(5f); //move time -- higher values allow the gas to move slower, lower values mean fast gas
+                    //TODO: gasAdvanceLength should just be a float not a double silly billy!
+                    gasMoveMsg.Write((float)gasAdvanceLength); //move time -- higher values allow the gas to move slower, lower values mean fast gas
                     server.SendToAll(gasMoveMsg, NetDeliveryMethod.ReliableOrdered);
                 }
             }
         }
-        
+
+        private void advanceTimeAndEventCheck()
+        {
+            //basically a copy and paste from checkStartTimer(). Any inaccuracies/inefficency there also appear here.
+            if (prevTimeA != DateTime.Now.Second)
+            {
+                matchTime += 1;
+                prevTimeA = DateTime.Now.Second;
+
+                switch (matchTime)
+                {
+                    case 60:
+                        createNewSafezone(620, 720, 620, 720, 6000, 3000, 60);
+                        gasAdvanceLength = 72;
+                        break;
+                    case 212:
+
+                        break;
+                    default:
+                        Logger.DebugServer("Nothing to do...");
+                        break;
+                }
+            }
+        }
+
+        private void createNewSafezone(float x1, float y1, float x2, float y2, float r1, float r2, float time)
+        {
+            NetOutgoingMessage gasMsg = server.CreateMessage();
+            gasMsg.Write((byte)33);
+            gasMsg.Write(x1); //starting circle centerX
+            gasMsg.Write(y1); //starting circle centerY
+            gasMsg.Write(x2); //end circle centerX
+            gasMsg.Write(y2); //end circle centerY
+            gasMsg.Write(r1); //radius of circle1
+            gasMsg.Write(r2); //radius of circle2
+            gasMsg.Write(time); //time until it shall advance
+            server.SendToAll(gasMsg, NetDeliveryMethod.ReliableOrdered);
+            gasAdvanceTimer = time;
+        }
+
+        private void checkForWinnerWinnerChickenDinner()
+        {
+            Logger.Failure("You shouldn't have done that.");
+        }
+
         //TODO : Make this better :3
         private void sendStartGame()
         {
@@ -531,14 +566,16 @@ namespace WC.SARS
                     sendPlayerCharacters();
                     break;
                 case 7:
+                    Logger.Header("someone wants to land.");
                     Player ejectedPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     NetOutgoingMessage sendEject = server.CreateMessage();
                     sendEject.Write((byte)8);
                     sendEject.Write(ejectedPlayer.myID);
                     sendEject.Write(ejectedPlayer.position_X);
                     sendEject.Write(ejectedPlayer.position_Y);
-                    sendEject.Write(true);
+                    sendEject.Write(true); //isParachute
                     server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
+                    Logger.Warn($"sent info. who was ejected?\n{ejectedPlayer.myName}: ID {ejectedPlayer.myID} -- ({ejectedPlayer.position_X},{ejectedPlayer.position_Y} )");
                     break;
 
                 case 14:
@@ -1642,6 +1679,40 @@ namespace WC.SARS
                 }
             }
             player_list = temp_plrlst;
+        }
+
+        private short getPlayerListLength()
+        {
+            short length;
+            if (isSorted)
+            {
+                Logger.Header("Already sorted playerlist! wahoo!");
+                Logger.Basic($"length of playerList array = {player_list.Length}");
+                for (length = 0; length < player_list.Length; length++)
+                {
+                    if (player_list[length] == null)
+                    {
+                        break;
+                    }
+                }
+                Logger.Basic($"returned value: {length}");
+                return length;
+            }
+            else
+            {
+                Logger.Header("WE MUST SORT THE PLAYER LIST BEFORE FINDING LENGTH");
+                Logger.Basic($"length of playerList array = {player_list.Length}");
+                sortPlayersListNull(); //doing this may not be necessary because the main update thread should already sorted. but who knows!
+                for (length = 0; length < player_list.Length; length++)
+                {
+                    if (player_list[length] == null)
+                    {
+                        break;
+                    }
+                }
+                Logger.Basic($"returned value: {length}");
+                return length;
+            }
         }
 
         //Helper Functions to get playerID
