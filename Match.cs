@@ -19,7 +19,7 @@ namespace WC.SARS
         private bool isSorting, isSorted;
         public double timeUntilStart, gasAdvanceTimer, gasAdvanceLength;
 
-        //these get to go at some point, or never. I'm quite lazy.
+        //mmmmmmmmmmmmmmmmmmmmmmmmmmmmm
         public bool DEBUG_ENABLED;
         public bool ANOYING_DEBUG1;
 
@@ -48,7 +48,7 @@ namespace WC.SARS
             config.LocalAddress = System.Net.IPAddress.Parse(ip);
             config.Port = port;
             server = new NetServer(config); // todo make sure server actually starts before having to launch update thread?
-            server.Start();
+            server.Start(); // ^ pretty sure I did that already :33
             updateThread.Start();
             NetIncomingMessage msg;
             while (true)
@@ -69,11 +69,12 @@ namespace WC.SARS
                                     NetOutgoingMessage acceptMsgg = server.CreateMessage();
                                     acceptMsgg.Write((byte)0);
                                     acceptMsgg.Write(true);
-                                    server.SendMessage(acceptMsgg, msg.SenderConnection, NetDeliveryMethod.ReliableSequenced);
+                                    server.SendMessage(acceptMsgg, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
                                     isSorted = false;
                                     break;
                                 case NetConnectionStatus.Disconnected:
                                         Logger.Warn("Searching for player that disconnected.");
+                                        Logger.Failure(msg.ReadString());
                                         //Logger.Warn($"{msg.SenderEndPoint} has disconnected...");
                                         short plr = getPlayerArrayIndex(msg.SenderConnection);
                                         if (plr != -1)
@@ -97,9 +98,8 @@ namespace WC.SARS
                             break;
                         case NetIncomingMessageType.ConnectionApproval:
                             Logger.Header("<< Incoming Connection >>");
-                            //Console.WriteLine("Incoming Connection! Wowie!");
                             string clientKey = msg.ReadString();
-                            if (clientKey == "flwoi51nawudkowmqqq") //look. if you're editing your game to even be able to connect, you already know this.
+                            if (clientKey == "flwoi51nawudkowmqqq")
                             {
                                 if (!matchStarted){
                                     Logger.Success("Connection Allowed.");
@@ -121,10 +121,11 @@ namespace WC.SARS
                             Logger.Failure("EPIC BLUNDER! " + msg.ReadString());
                             break;
                         case NetIncomingMessageType.ConnectionLatencyUpdated:
-                                //look I don't know why, but yes sending a message here does include the type ConnectionLatencyUpdated.
-                                //Logger.Header($"ping from {msg.SenderConnection}");
+                                Logger.Warn("Connection Latency Updated... ?");
                                 NetOutgoingMessage pingBack = server.CreateMessage();
-                                server.SendMessage(pingBack, msg.SenderConnection, NetDeliveryMethod.ReliableUnordered);
+                                pingBack.Write((byte)97);
+                                pingBack.Write("well, you shouldn't really be getting this");
+                                server.SendMessage(pingBack, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
                             break;
                         default:
                             Logger.Failure("Unhandled type: " + msg.MessageType);
@@ -135,7 +136,8 @@ namespace WC.SARS
                 Thread.Sleep(slpTime);
             }
         }
-
+        //lots of important things go on in here
+        #region server update thread
         private void serverUpdateThread() //where most things get updated...
         {
             Logger.Success("Server update thread started.");
@@ -157,6 +159,7 @@ namespace WC.SARS
                 //updating player info to all people in the match
                 updateEveryoneOnPlayerPositions();
                 updateEveryoneOnPlayerInfo();
+                test_SENDDUMMY();
                 //updateServerTapeCheck(); --similar idea, about as stupid.
 
                 //sleep for a sec 
@@ -174,7 +177,7 @@ namespace WC.SARS
 
                 updateServerDrinkCheck();
                 //updateServerTapeCheck(); --similar idea, about as stupid.
-                updateEveryonePingList();
+                //updateEveryonePingList();
                 test_SENDDUMMY();
 
                 advanceTimeAndEventCheck();
@@ -262,8 +265,8 @@ namespace WC.SARS
         {
             NetOutgoingMessage dummy = server.CreateMessage();
             dummy.Write((byte)97);
-            dummy.Write("a dummy makes money off a dummy");
-            server.SendToAll(dummy, NetDeliveryMethod.ReliableUnordered);
+            //dummy.Write("a dummy makes money off a dummy");
+            server.SendToAll(dummy, NetDeliveryMethod.ReliableOrdered);
         }
 
         private void updateEveryonePingList()
@@ -283,7 +286,7 @@ namespace WC.SARS
                 pings.Write(player_list[j].myID);
                 pings.Write((short)420);//ping in ms
             }
-            server.SendToAll(pings, NetDeliveryMethod.ReliableUnordered);
+            server.SendToAll(pings, NetDeliveryMethod.ReliableOrdered);
         }
 
         private void updateServerDrinkCheck()
@@ -449,38 +452,32 @@ namespace WC.SARS
             startMsg.Write((short)600);
 
             //Send message out
-            server.SendToAll(startMsg, NetDeliveryMethod.ReliableUnordered);
+            server.SendToAll(startMsg, NetDeliveryMethod.ReliableOrdered);
         }
+        #endregion
 
-
-        // End of Update Thread
-
-        // Start of HandleMessage
-        
-
+        // only reason this exists is just so the part of the server code where it checks for connections and stuff isn't clutted too much
+        // until it is pretty close to being fine-enough. it caused a big mess.
         private void HandleMessage(NetIncomingMessage msg)
         {
-            //Stopwatch watch = new Stopwatch();
-            //watch.Start();
             byte b = msg.ReadByte();
-            if (DEBUG_ENABLED) {
-                if (b != 14)
-                {
-                    Logger.Header($"Byte : {b}");
-                } }
+            if (b != 14) {
+                Logger.DebugServer(b.ToString());
+            }
 
             switch (b)
             {
                 // Request Authentication
                 case 1:
                     Logger.Header($"Authentication Requestion\nSender: {msg.SenderEndPoint}\n");
-                    sendAuthToPlayer(msg.SenderConnection);
+                    sendAuthenticationResponseToClient(msg.SenderConnection);
                     break;
 
                 case 3: // still has work to be done
-                    Logger.Header($"Sender {msg.SenderEndPoint}'s Ready Received. Now, let's read their player-character info.");
+                    Logger.Header($"Sender {msg.SenderEndPoint}'s Ready Received. Now reading character data.");
                     serverHandlePlayerConnection(msg);
-                    /*for (short i = 0; i < player_list.Length; i++)
+                    /* this can go. just wanted it to make sure that if something went wrong the backup was still around.
+                     * for (short i = 0; i < player_list.Length; i++)
                     {
                         if (player_list[i] == null)
                         {
@@ -579,7 +576,7 @@ namespace WC.SARS
                     break;
 
                 case 14:
-                    float mAngle = msg.ReadFloat(); //before I changed this to float it was int16 idrk if that matters...
+                    float mAngle = msg.ReadFloat(); //server should actually be reading an int16() I think. modified game to make easier.
                     float actX = msg.ReadFloat();
                     float actY = msg.ReadFloat();
                     byte currentwalkMode = msg.ReadByte();
@@ -602,7 +599,7 @@ namespace WC.SARS
                     //annoying debug section
                     if (ANOYING_DEBUG1)
                     {
-                        Logger.Warn($"Mouse Angle as a Short: {mAngle}");
+                        Logger.Warn($"Mouse Angle: {mAngle}");
                         Logger.Warn($"playerX: {actX}");
                         Logger.Warn($"playerY: {actY}");
                         Logger.Basic($"player WalkMode: {currentwalkMode}");
@@ -612,7 +609,7 @@ namespace WC.SARS
 
                     short weaponID = msg.ReadInt16(); //short -- WeaponId
                     byte slotIndex = msg.ReadByte();//byte -- slotIndex
-                    float aimAngle = msg.ReadFloat();//float (myver) -- aimAngle
+                    float aimAngle = (msg.ReadFloat() / 57.295776f); //no clue if dividing actually gets to the correct angle or not (found in game)
                     float spawnPoint_X = msg.ReadFloat();//float -- spawnPoint.X
                     float spawnPoint_Y = msg.ReadFloat();//float -- spawnPoint.Y
                     bool shotPointValid = msg.ReadBoolean();//bool -- shotPointValid
@@ -622,7 +619,7 @@ namespace WC.SARS
                     if (didHitADestruct)
                     {
                         destructCollisionPoint_X = msg.ReadInt16();
-                        destructCollisionPoint_Y = msg.ReadInt16(); // I think this is meant for the server but whatevs
+                        destructCollisionPoint_Y = msg.ReadInt16();
                     }
                     short attackID = msg.ReadInt16();//short -- attackID
                     byte sendProjectileAnglesArrayLength = msg.ReadByte();//byte -- projectileAngles.Length
@@ -644,7 +641,7 @@ namespace WC.SARS
                     {
                         for (int i = 0; i < sendProjectileAnglesArrayLength; i++)
                         {
-                            plrShot.Write(msg.ReadFloat());
+                            plrShot.Write(msg.ReadFloat() / 57.295776f);
                             plrShot.Write(msg.ReadInt16());
                             plrShot.Write(msg.ReadBoolean());
                         }
@@ -681,7 +678,7 @@ namespace WC.SARS
                     testMessage.Write((int)item); // the item
                     testMessage.Write(index);
                     testMessage.Write((byte)4); //Forced Rarity -- seems only applicable in the shooting gallery
-                    server.SendToAll(testMessage, NetDeliveryMethod.ReliableUnordered);
+                    server.SendToAll(testMessage, NetDeliveryMethod.ReliableSequenced);
                     break;
 
 
@@ -822,7 +819,7 @@ namespace WC.SARS
                     descBroke.Write((byte)1);
                     descBroke.Write((short)4);
 
-                    server.SendToAll(descBroke, NetDeliveryMethod.ReliableUnordered);
+                    server.SendToAll(descBroke, NetDeliveryMethod.ReliableOrdered);
 
                     /* goes to: GameServerSentDoodadDestroyed
                      * GameServerSentDoodadDestroyed(desctructX, destructY,
@@ -853,9 +850,10 @@ namespace WC.SARS
                     break;
 
                 case 97: //dummy message << if you got this, the client believes it is lagging
+                    Logger.Basic("dummy lol");
                     NetOutgoingMessage dummyMsg = server.CreateMessage();
                     dummyMsg.Write((byte)97);
-                    server.SendMessage(dummyMsg, msg.SenderConnection, NetDeliveryMethod.UnreliableSequenced);
+                    server.SendMessage(dummyMsg, msg.SenderConnection, NetDeliveryMethod.Unreliable);
                     break;
                 //clientSendDucttaping
                 case 98:
@@ -863,21 +861,17 @@ namespace WC.SARS
                     break;
 
                 default:
-                    Logger.missingHandle(b.ToString());
+                    Logger.missingHandle("message missing handle? start ID: "+b.ToString());
                     break;
 
             }
-
-            //watch.Stop();
-            //Logger.Header($"time taken: {watch.Elapsed}");
-            //this stopwatch is very much not needed.
         }
         //message 1 -> send 2
-        private void sendAuthToPlayer(NetConnection client)
+        private void sendAuthenticationResponseToClient(NetConnection client)
         {
             NetOutgoingMessage acceptMsg = server.CreateMessage();
             acceptMsg.Write((byte)2);
-            acceptMsg.Write(true);
+            acceptMsg.Write(true); //todo -- should definitely check if the player is banned or whatnot.
             server.SendMessage(acceptMsg, client, NetDeliveryMethod.ReliableOrdered);
             Logger.Success($"Server sent {client.RemoteEndPoint} their accept message!");
         }
@@ -885,8 +879,8 @@ namespace WC.SARS
         private void serverHandlePlayerConnection(NetIncomingMessage msg)
         {
             //Read the player's character info and stuff
-            ulong steamID = msg.ReadUInt64(); //not in base
-            string steamName = msg.ReadString();//not in base -- must be added in
+            ulong steamID = msg.ReadUInt64();     //not in base
+            string steamName = msg.ReadString();  //not in base -- must be added in
             short charID = msg.ReadInt16();
             short umbrellaID = msg.ReadInt16();
             short graveID = msg.ReadInt16();
@@ -915,7 +909,7 @@ namespace WC.SARS
 
             //find an empty slot
             sortPlayersListNull(); //need to find an empty i
-            //TODO :: make sure this finds the REAL non-existent value
+            //TODO: I think there is a better way of finding the ID that is available and stuff but not sure how
             for (short i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
@@ -928,28 +922,31 @@ namespace WC.SARS
             }
         }
 
-        //message 3 > << message 4 >> --still needs working ------ make seed random
         private void sendClientMatchInfo2Connect(short sendingID, NetConnection receiver)
         {
             // send a message back to the connecting player... \\
             NetOutgoingMessage mMsg = server.CreateMessage();
-            mMsg.Write((byte)4); //Header (doesn't matter)
+            mMsg.Write((byte)4);
             mMsg.Write(sendingID); // Assigned Player ID
 
-            // TODO : Make Seed Randomized...
-            mMsg.Write(351301); //seed 1 -- int32
-            mMsg.Write(5328522); //seed 2 -- int32 
-            mMsg.Write(9037281); //seed 3 -- int32 
-            // TODO : MAKE SEED RANDOMIZED
+            // todo: *must* make match seeds random. could just use system.Random() but didn't wanna bother yet
+            mMsg.Write(351301);  // int32 -- seed 1 (GameServer: Sent LootGen Seed)
+            mMsg.Write(5328522); // int32 -- seed 2 (GameServer: Sent CoconutGen Seed)
+            mMsg.Write(9037281); // int32 -- seed 2 (GameServer: Sent VehicleGen Seed)
 
-            mMsg.Write(timeUntilStart); //time at which game will start [double] 
-            mMsg.Write("yerhAGJ"); // match UUID -- string -- *should* be random but is fine for now
-            mMsg.Write("solo"); // game mode [solo, duo, squad]
-            mMsg.Write((float)0); //x -- No clue? -- maybe has to do with flightpath
-            mMsg.Write((float)0); //y
-            mMsg.Write((float)8000); //x2
-            mMsg.Write((float)8000); //y2 -- No clue -- flight start and end points ig
+            mMsg.Write(timeUntilStart); // double -- clientTimeAtWhichGameWillStart
+            mMsg.Write("yerhAGJ");      // string -- Match UUID ||  [ MatchUUID ]
+            mMsg.Write("solo");         // string -- gamemode ||  [ gameMode ]
 
+            //todo: *must find a way to "randomize" flight path (I say "random" because it seems as though paths aren't entirely random...)
+            mMsg.Write((float)0);       // float -- x1 - flightStartPoint
+            mMsg.Write((float)0);       // float -- y1 
+            mMsg.Write((float)8000);    // float -- x2 -- flightEndPoint
+            mMsg.Write((float)8000);    // float -- y2
+
+            /*this last part is the server telling the game info about where the gallery targets are and stuff
+             * if nothing is included (like it is here) the targets just don't appear. which is fine by me.
+             * whether or not the targets are working is not really game-changing so not dealing with that headache right now. */
             mMsg.Write((byte)0); // amount of times to loop through thing ig but I skipped out. something with gallery targets
             mMsg.Write((byte)0); // that gallery target's score or whatever but I don't give a darn
 
@@ -960,6 +957,7 @@ namespace WC.SARS
         //message 5 > send10
         private void sendPlayerCharacters()
         {
+            Logger.Header($"Beginning to send player characters to everyone once again.");
             NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
             sendPlayerPosition.Write((byte)10);
             for (byte i = 0; i < player_list.Length; i++)
@@ -976,7 +974,7 @@ namespace WC.SARS
             {
                 if (player_list[i] != null)
                 {
-                    Logger.Header($"Sending << player_list[{i}] >>");
+                    Logger.Basic($"Sending << player_list[{i}] >>");
                     //For Loop Start // this byte may be a list of all players. I'm not sure though!
                     sendPlayerPosition.Write(i); //num4 / myAssignedPlayerID? [SHORT]
                     sendPlayerPosition.Write(player_list[i].charID); //charIndex [SHORT]
@@ -1023,28 +1021,20 @@ namespace WC.SARS
                     sendPlayerPosition.Write(player_list[i].isMod); //isMod
                     sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
                     sendPlayerPosition.Write((short)450); //accLvl -- short
-                    sendPlayerPosition.Write((byte)1); //b6 -- not too sure, but normal byte
-                    sendPlayerPosition.Write((short)25); //list of something gets added...
+                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
+                    //sendPlayerPosition.Write((short)25); //teammate ID
 
                 }
                 else { Logger.Success($"breakout! count: {i}"); break; }// break out of loop
             }
             Logger.Success("Going to be sending new player all other player positions.");
-            server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced); // CHANGED FROM BOTTOM TO THIS IDK WHAT IT DOES
-                                                                                       //server.SendMessage(sendPlayerPosition, msg.SenderConnection, NetDeliveryMethod.UnreliableSequenced);
+            server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
         }
 
 
         //18 > 19
         private void serverSendPlayerShoteded(NetIncomingMessage message)
         {
-            /*
-            netOutgoingMessage.Write(targetPlayerID);
-            netOutgoingMessage.Write(weaponID);
-            netOutgoingMessage.Write(optionalProjectileID);
-            netOutgoingMessage.Write(hitPosition.x);
-            netOutgoingMessage.Write(hitPosition.y);*/
-
             short hitPlayerID = message.ReadInt16();
             short wepID = message.ReadInt16();
             short projID = message.ReadInt16();
@@ -1060,28 +1050,12 @@ namespace WC.SARS
             msg.Write((short)-1);
 
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
-
-            /*
-             * short fromPlayerID = msg.ReadInt16();
-             * short toPlayerID = msg.ReadInt16();
-             * short optionalProjectileID = msg.ReadInt16();
-             * byte dinkedArmorInitialAmount = msg.ReadByte();
-             * short num17 = msg.ReadInt16();
-             * byte vehicleHP = 0;
-                if (num17 >= 0)
-                    {
-                        vehicleHP = msg.ReadByte();
-                        }
-					if (GameServerManager.responderGame != null)
-					{
-					GameServerManager.responderGame.GameServerSentServerAttackHit(fromPlayerID, toPlayerID, optionalProjectileID, dinkedArmorInitialAmount, num17, vehicleHP);
-				return;
-			}*/
         }
 
         //25 > 26/94/106 -- is A HUGE mess
         private void serverHandleChatMessage(NetIncomingMessage message)
         {
+            Logger.Header("Chat message. Wonderful!");
             //this can either be a command, or an actual chat message. let's find out if it was a command
             if (message.PeekString().StartsWith("/"))
             {
@@ -1389,7 +1363,21 @@ namespace WC.SARS
                         {
                             responseMsg = $"Insufficient amount of arguments provided. This command takes 1. Given: {command.Length - 1}.";
                         }
-
+                        break;
+                    case "/sendjunk":
+                        Logger.Success("user used... sending JUNK?!!");
+                        NetOutgoingMessage LOL = server.CreateMessage();
+                        LOL.Write((byte)97);
+                        LOL.Write("Hello, this is a string!");
+                        LOL.Write(245f);
+                        LOL.Write("There was a float somewhere there (2)...");
+                        LOL.Write((short)5);
+                        LOL.Write("There was a short somewhere there (5)...");
+                        LOL.Write(true);
+                        LOL.Write("There was a bool somewhere there (true)...");
+                        LOL.Write("But that's all for now. Have fun with this RELIABLE ORDERED message!");
+                        server.SendToAll(LOL, NetDeliveryMethod.ReliableUnordered);
+                        responseMsg = "All good. Have fun lol";
                         break;
 
                     default:
@@ -1531,25 +1519,6 @@ namespace WC.SARS
             vehicleHit.Write((byte)2);
 
             server.SendToAll(vehicleHit, NetDeliveryMethod.ReliableOrdered);
-
-            
-            /*
-            //client gets this
-            short fromPlayerID2 = msg.ReadInt16();
-            short toPlayerID2 = msg.ReadInt16();
-            bool didKillPlayer = msg.ReadBoolean();
-            short fromVehicleIndex = msg.ReadInt16();
-            short num33 = msg.ReadInt16();
-            byte optionalTargetVehicleHP = 0;
-            if (num33 >= 0)
-            {
-                optionalTargetVehicleHP = msg.ReadByte();
-            }
-            if (GameServerManager.responderGame != null)
-            {
-                GameServerManager.responderGame.GameServerSentVehicleHitPlayer(fromPlayerID2, toPlayerID2, fromVehicleIndex, num33, optionalTargetVehicleHP, didKillPlayer);
-                return;
-            }*/
         }
 
         //send 63
@@ -1604,26 +1573,19 @@ namespace WC.SARS
         //r[87] > s[111]
         private void serverSendDepployedTrap(NetIncomingMessage message)
         {
-            /* client > server
-             * float x
-             * float y
-             * short ID
-             */
-            //float tX, tY; --idk
-            //short plrID; -- idkidk
-
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)111);
             msg.Write(getPlayerID(message.SenderConnection));
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
-
-            /* server > client
-             * short playerID
-             * short trapID
-             */
         }
 
         //client[98] > server[99] -- started taping
+        /// <summary>
+        /// Sends to everyone in the match a player who has started to tape along with their position.
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="posX"></param>
+        /// <param name="posY"></param>
         private void serverSendPlayerStartedTaping(NetConnection sender, float posX, float posY)
         {
             Player plr = player_list[getPlayerArrayIndex(sender)];
@@ -1637,7 +1599,10 @@ namespace WC.SARS
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
 
-        
+        #region player list methods
+        /// <summary>
+        /// Sorts out null instances in the player list. Does not put them in sequential order.
+        /// </summary>
         private void sortPlayersListNull()
         {
             Logger.testmsg("attempting to sort playerlist...");
@@ -1753,6 +1718,6 @@ namespace WC.SARS
             //Logger.Header($"Returned ID will be: {id}");
             //return id;
         }
+        #endregion
     }
-
 }

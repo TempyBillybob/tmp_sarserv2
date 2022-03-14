@@ -22,8 +22,8 @@ namespace WC.SARS
                     switch (Console.ReadKey().Key)
                     {
                         case ConsoleKey.Y:
-                            Logger.Basic("attempting to start a server! (port: 4206; local address: 192.168.1.15)");
-                            Match match2 = new Match(4206, "192.168.1.15", false, false);
+                            Logger.Basic("attempting to start a server! (port: 4206; local address: 192.168.1.13)");
+                            Match match2 = new Match(4206, "192.168.1.13", false, false);
                             break;
                         case ConsoleKey.N:
                             Logger.Basic("attempting to start a server! (port: 42896; local address: 192.168.1.198)");
