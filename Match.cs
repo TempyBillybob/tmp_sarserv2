@@ -43,7 +43,6 @@ namespace WC.SARS
             ANOYING_DEBUG1 = annoying;
             config = new NetPeerConfiguration("BR2D");
             config.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
-            config.EnableMessageType(NetIncomingMessageType.ConnectionApproval);
             config.PingInterval = 22f;
             config.LocalAddress = System.Net.IPAddress.Parse(ip);
             config.Port = port;
@@ -121,11 +120,21 @@ namespace WC.SARS
                             Logger.Failure("EPIC BLUNDER! " + msg.ReadString());
                             break;
                         case NetIncomingMessageType.ConnectionLatencyUpdated:
-                                Logger.Warn("Connection Latency Updated... ?");
-                                NetOutgoingMessage pingBack = server.CreateMessage();
-                                pingBack.Write((byte)97);
-                                pingBack.Write("well, you shouldn't really be getting this");
-                                server.SendMessage(pingBack, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
+                                Logger.Header("--> ConnectionLatencyUpdated:");
+                                try
+                                {
+                                    float pingTime = msg.ReadFloat();
+                                    Logger.Basic($"  -> Ping time: {pingTime}");
+                                }
+                                catch
+                                {
+                                    Logger.Failure("no float to read?");
+                                }
+
+                                //NetOutgoingMessage pingBack = server.CreateMessage();
+                                //pingBack.Write((byte)97);
+                                //pingBack.Write("well, you shouldn't really be getting this");
+                                //server.SendMessage(pingBack, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
                             break;
                         default:
                             Logger.Failure("Unhandled type: " + msg.MessageType);
@@ -472,86 +481,6 @@ namespace WC.SARS
                 case 3: // still has work to be done
                     Logger.Header($"Sender {msg.SenderEndPoint}'s Ready Received. Now reading character data.");
                     serverHandlePlayerConnection(msg);
-                    /* this can go. just wanted it to make sure that if something went wrong the backup was still around.
-                     * for (short i = 0; i < player_list.Length; i++)
-                    {
-                        if (player_list[i] == null)
-                        {
-                            //pID = i;
-                            ulong steamID = msg.ReadUInt64(); //steamID64- this is from ME! :D
-                            string readName = msg.ReadString(); //player's name from steam; this is also from me! :D
-                            short charID = msg.ReadInt16(); // Character/Avatar ID
-                            short umbrellaID = msg.ReadInt16(); // Umbrella ID
-                            short gravestoneID = msg.ReadInt16(); // Gravestone ID
-                            short deathExplosionID = msg.ReadInt16(); // Death Explosion ID
-                            short[] emoteIDs = { msg.ReadInt16(), msg.ReadInt16(), msg.ReadInt16(), msg.ReadInt16(), msg.ReadInt16(), msg.ReadInt16(), }; // Emote ID
-                            short hatID = msg.ReadInt16(); // Hat ID
-                            short glassesID = msg.ReadInt16(); // Glasses ID
-                            short beardID = msg.ReadInt16(); // Beard ID
-                            short clothesID = msg.ReadInt16(); // Clothes ID
-                            short meleeID = msg.ReadInt16(); // MeleeWeaponID
-                            byte skinIndexID = msg.ReadByte(); // GunSkinByGunID
-                            short[] skinShorts = new short[skinIndexID];
-                            byte[] skinValues = new byte[skinIndexID];
-                            for (byte l = 0; l < skinIndexID; l++)
-                            {
-                                skinShorts[l] = msg.ReadInt16();
-                                skinValues[l] = msg.ReadByte();
-                            }
-                            //short skinShort = msg.ReadInt16(); // indexInJSONFileList
-                            //byte skinKey = msg.ReadByte(); // keyValuePair.Value
-
-                            player_list[i] = new Player(i, charID, umbrellaID, gravestoneID, deathExplosionID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, skinIndexID, skinShorts, skinValues);
-                            player_list[i].sender = msg.SenderConnection;
-                            player_list[i].myName = readName;
-                            switch (steamID) // TODO: read from external file
-                            {
-                                case 76561198384352240:
-                                    player_list[i].isMod = true;
-                                    break;
-                                case 76561198218282413:
-                                    player_list[i].isMod = true;
-                                    break;
-                                case 76561198162222086:
-                                    player_list[i].isMod = true;
-                                    break;
-                                case 76561198323046172:
-                                    player_list[i].isMod = true;
-                                    break;
-                                default:
-                                    player_list[i].isFounder = true;
-                                    break;
-                            }
-                            sendClientMatchInfo2Connect(i, msg.SenderConnection);
-                            break;
-                        }
-                    }
-
-                    //no longer needed, but is useful.
-                    if (DEBUG_ENABLED)
-                    {
-                        for (int i = 0; i < player_list.Length; i++)
-                        {
-                            if (player_list[i] != null)
-                            {
-                                Logger.Basic($"Player ID For Match: {player_list[i].myID}");
-                                Logger.Basic($"Avatar/Character ID: {player_list[i].avatarID}");
-                                Logger.Basic($"Umbrella ID: {player_list[i].umbrellaID}");
-                                Logger.Basic($"Gravestone ID: {player_list[i].gravestoneID}");
-                                Logger.Basic($"Death Explosion ID: {player_list[i].deathExplosionID}");
-                                Logger.Basic($"Emote ID: {player_list[i].emoteIDs}");
-                                Logger.Basic($"Hat ID: {player_list[i].hatID}");
-                                Logger.Basic($"Glasses ID: {player_list[i].glassesID}");
-                                Logger.Basic($"Beard ID: {player_list[i].beardID}");
-                                Logger.Basic($"Clothes ID: {player_list[i].clothesID}");
-                                Logger.Basic($"Melee Weapon ID: {player_list[i].meleeID}");
-                                Logger.Basic($"Gun-Skin-by-Index-ID: {player_list[i].gunSkinIndexByIDAmmount}");
-                                //Logger.Basic($"Unsure 1: {player_list[i].UNKNOWN_BYTE}");
-                                //Logger.Basic($"Unsure 2: {player_list[i].UNKNOWN_DATA}");
-                            }
-                            else { break; }
-                        }
-                    }*/
                     break;
 
                 case 5:
@@ -559,7 +488,6 @@ namespace WC.SARS
                     sendPlayerCharacters();
                     break;
                 case 7:
-                    Logger.Header("someone wants to land.");
                     Player ejectedPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     NetOutgoingMessage sendEject = server.CreateMessage();
                     sendEject.Write((byte)8);
@@ -568,11 +496,12 @@ namespace WC.SARS
                     sendEject.Write(ejectedPlayer.position_Y);
                     sendEject.Write(true); //isParachute
                     server.SendToAll(sendEject, NetDeliveryMethod.ReliableSequenced);
-                    Logger.Warn($"sent info. who was ejected?\n{ejectedPlayer.myName}: ID {ejectedPlayer.myID} -- ({ejectedPlayer.position_X},{ejectedPlayer.position_Y} )");
+                    Logger.Warn($"Player ID {ejectedPlayer.myID} ({ejectedPlayer.myName}) has ejected!\nX, Y: ({ejectedPlayer.position_X}, {ejectedPlayer.position_Y})");
                     break;
 
                 case 14:
-                    float mAngle = msg.ReadFloat(); //server should actually be reading an int16() I think. modified game to make easier.
+                    //this isn't accurate entirely. everything aside from mAngle is normal I think?
+                    float mAngle = msg.ReadFloat();
                     float actX = msg.ReadFloat();
                     float actY = msg.ReadFloat();
                     byte currentwalkMode = msg.ReadByte();
@@ -592,17 +521,15 @@ namespace WC.SARS
                         }
                         else { break;}
                     }
-                    //annoying debug section
                     if (ANOYING_DEBUG1)
                     {
                         Logger.Warn($"Mouse Angle: {mAngle}");
                         Logger.Warn($"playerX: {actX}");
                         Logger.Warn($"playerY: {actY}");
                         Logger.Basic($"player WalkMode: {currentwalkMode}");
-                    } 
+                    }
                     break;
-                case 16:
-
+                case 16: //no clue how true to the actual this is
                     short weaponID = msg.ReadInt16(); //short -- WeaponId
                     byte slotIndex = msg.ReadByte();//byte -- slotIndex
                     float aimAngle = (msg.ReadFloat() / 57.295776f); //no clue if dividing actually gets to the correct angle or not (found in game)
@@ -648,7 +575,6 @@ namespace WC.SARS
                     serverSendPlayerShoteded(msg);
                     break;
                 case 21:
-                    //Writes 21 > Write(int:lootID) > Write(byte:slotIndex) [EDIT 2/3/22: what? lol]
                     Player currPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     short item = (short)msg.ReadInt32();
                     byte index = msg.ReadByte();
@@ -663,9 +589,11 @@ namespace WC.SARS
                             currPlayer.equip2 = item;
                             currPlayer.equip2_rarity = 0;
                             break;
+                        case 2:
+                            currPlayer.equip3 = item;
+                            break;
                         default:
                             Logger.Failure($"Well something went wrong with the index... index: {index}");
-                            //pssst nothing went wrong (probs), throwables just aren't dealt with
                             break;
                     }
                     NetOutgoingMessage testMessage = server.CreateMessage();
@@ -778,18 +706,22 @@ namespace WC.SARS
                 //clientSendPlayerEmote
                 case 66:
 
-                    //Send Back a response
-                    short ePlayerID = getPlayerID(msg.SenderConnection);
-                    short ePlayerIndex = getPlayerArrayIndex(msg.SenderConnection);
+                    //Tell everyone who emoted
+                    Player emotingPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)]; //only need to get player once.
+                    //short ePlayerID = getPlayerID(msg.SenderConnection); -- old
+                    //int ePlayerIndex = getPlayerArrayIndex(msg.SenderConnection); -- old
                     NetOutgoingMessage emoteMsg = server.CreateMessage();
                     emoteMsg.Write((byte)67); //Header
-                    emoteMsg.Write(ePlayerID); //obviously ID
+                    emoteMsg.Write(emotingPlayer.myID);
+                    //emoteMsg.Write(player_list[ePlayerIndex].myID); //obviously ID -- old
                     emoteMsg.Write(msg.ReadInt16()); //Read emote id to then send to everyone!
                     server.SendToAll(emoteMsg, NetDeliveryMethod.ReliableUnordered);
 
                     //update player info rq
-                    player_list[ePlayerIndex].position_X = msg.ReadFloat();
-                    player_list[ePlayerIndex].position_Y = msg.ReadFloat();
+                    emotingPlayer.position_X = msg.ReadFloat();
+                    emotingPlayer.position_Y = msg.ReadFloat();
+                    //player_list[ePlayerIndex].position_X = msg.ReadFloat(); -- old
+                    //player_list[ePlayerIndex].position_Y = msg.ReadFloat(); -- old
                     break;
 
                 case 72: // CLIENT_DESTORY_DOODAD
@@ -826,27 +758,26 @@ namespace WC.SARS
 
                     break;
 
-                case 74: //attack windUP -- seems to have something to do with the minigun... not noticed elsewhere.
-                    Logger.testmsg("\nplease note this occurred!!! attack windup. well that's rare...\n-- please note this\n");
+                case 74: //attack windup. appears to only be used when starting to fire the minigun. no where else.
+                    Logger.testmsg("\nAttack Windup used.\nNote if you see this message/find out when.");
                     serverSendAttackWindUp(msg);
                     break;
 
-                case 75: //attack windDOWN
-                        Logger.testmsg("\nplease note this occurred!!! attack winddown. well that's even rarer...\n-- please note this\n");
-                        serverSendAttackWindDown(getPlayerID(msg.SenderConnection), msg.ReadInt16());
+                case 75: //attack wind down -- clearly is used when someone revs-down a minigun. unknown if used elsewhere.
+                    Logger.testmsg("\nAttack Wind Downed used.\nNote if you see this message/find out when.");
+                    serverSendAttackWindDown(getPlayerID(msg.SenderConnection), msg.ReadInt16());
                     break;
                 case 87:
                         serverSendDepployedTrap(msg);
                     break;
                 case 90: //reload weapon
-                    NetOutgoingMessage plrCanceled = server.CreateMessage();
-                    plrCanceled.Write((byte)91);
-                    plrCanceled.Write(getPlayerID(msg.SenderConnection));
-                    server.SendToAll(plrCanceled, NetDeliveryMethod.ReliableSequenced);
+                    NetOutgoingMessage plrCancelReloadMsg = server.CreateMessage();
+                    plrCancelReloadMsg.Write((byte)91);
+                    plrCancelReloadMsg.Write(getPlayerID(msg.SenderConnection));
+                    server.SendToAll(plrCancelReloadMsg, NetDeliveryMethod.ReliableSequenced);
                     break;
 
-                case 97: //dummy message << if you got this, the client believes it is lagging
-                    Logger.Basic("dummy lol");
+                case 97: //client periodically sends it. if it never gets anything back like ever, then it starts thinking it is lagging.
                     NetOutgoingMessage dummyMsg = server.CreateMessage();
                     dummyMsg.Write((byte)97);
                     server.SendMessage(dummyMsg, msg.SenderConnection, NetDeliveryMethod.Unreliable);
@@ -857,7 +788,7 @@ namespace WC.SARS
                     break;
 
                 default:
-                    Logger.missingHandle("message missing handle? start ID: "+b.ToString());
+                    Logger.missingHandle($"Message appears to be missing handle. ID: {b}");
                     break;
 
             }
@@ -1202,12 +1133,14 @@ namespace WC.SARS
                             try
                             {
                                 id = short.Parse(command[1]);
-                                id2 = short.Parse(command[1]);
+                                id2 = short.Parse(command[2]);
 
 
                                 NetOutgoingMessage forcetoPos = server.CreateMessage();
                                 forcetoPos.Write((byte)8); forcetoPos.Write(id);
-                                forcetoPos.Write(player_list[id2].position_X); forcetoPos.Write(player_list[id2].position_Y); forcetoPos.Write(false);
+                                forcetoPos.Write(player_list[id2].position_X);
+                                forcetoPos.Write(player_list[id2].position_Y);
+                                forcetoPos.Write(false);
                                 server.SendToAll(forcetoPos, NetDeliveryMethod.ReliableOrdered);
 
                                 player_list[id].position_X = player_list[id2].position_X;
@@ -1395,6 +1328,13 @@ namespace WC.SARS
                         server.SendToAll(LOL, NetDeliveryMethod.ReliableUnordered);
                         responseMsg = "All good. Have fun lol";
                         break;
+                    case "/removeweapons":
+                        NetOutgoingMessage rmMsg = server.CreateMessage();
+                        rmMsg.Write((byte)125);
+                        rmMsg.Write(getPlayerID(message.SenderConnection));
+                        server.SendToAll(rmMsg, NetDeliveryMethod.ReliableUnordered);
+                        responseMsg = $"Weapons removed for {player_list[getPlayerArrayIndex(message.SenderConnection)].myName}";
+                        break;
 
                     default:
                         Logger.Failure("Invalid command used.");
@@ -1407,6 +1347,7 @@ namespace WC.SARS
                 allchatmsg.Write(getPlayerID(message.SenderConnection)); //ID of player who sent msg
                 allchatmsg.Write(responseMsg);
                 server.SendToAll(allchatmsg, NetDeliveryMethod.ReliableUnordered);
+                //server.SendMessage(allchatmsg, message.SenderConnection, NetDeliveryMethod.ReliableUnordered);
             } 
              else
             {
@@ -1711,9 +1652,7 @@ namespace WC.SARS
                 {
                     if (player_list[id].sender == thisSender)
                     {
-                        //Logger.Header($"Theoretical returned ID should be: {id}");
-                        //Logger.Header($"Returned ID will be: {id}");
-                        Logger.Success($"This sender ({thisSender.RemoteEndPoint}) is at array-index {id}, with an assigned ID of {player_list[id].myID}");
+                        //Logger.Success($"This sender ({thisSender.RemoteEndPoint}) is at array-index {id}, with an assigned ID of {player_list[id].myID}");
                         return id;
                     }
                 }
