@@ -34,6 +34,7 @@ namespace WC.SARS
         public byte activeSlot = 0;
         public short equip1 = -1;
         public short equip2 = -1;
+        public short equip3 = -1;
         public byte equip1_rarity = 0;
         public byte equip2_rarity = 0;
         public byte curEquipIndex = 0;
