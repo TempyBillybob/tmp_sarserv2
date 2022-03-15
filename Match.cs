@@ -150,6 +150,7 @@ namespace WC.SARS
                     matchFull = true;
                     Logger.Basic("Match seems to be full!");
                 }
+                send_dummy();
 
                 //check the count down timer
                 if (!matchStarted && (player_list[0] != null)) { checkStartTime(); }
@@ -159,7 +160,6 @@ namespace WC.SARS
                 //updating player info to all people in the match
                 updateEveryoneOnPlayerPositions();
                 updateEveryoneOnPlayerInfo();
-                test_SENDDUMMY();
                 //updateServerTapeCheck(); --similar idea, about as stupid.
 
                 //sleep for a sec 
@@ -171,14 +171,14 @@ namespace WC.SARS
             while (matchStarted)
             {
                 if (!isSorted) { sortPlayersListNull(); }
+                send_dummy();
                 //updating player info to all people in the match
                 updateEveryoneOnPlayerPositions();
                 updateEveryoneOnPlayerInfo();
 
                 updateServerDrinkCheck();
                 //updateServerTapeCheck(); --similar idea, about as stupid.
-                //updateEveryonePingList();
-                test_SENDDUMMY();
+                updateEveryonePingList();
 
                 advanceTimeAndEventCheck();
                 checkGasTime();
@@ -232,36 +232,32 @@ namespace WC.SARS
              */
 
             NetOutgoingMessage msg = server.CreateMessage();
-            short listL;
-            msg.Write((byte)45); //b == 45
-
-            //TODO: find more methods that want to only loop until hitting a null. make function that finds playerList length.
-            for (listL = 0; listL < player_list.Length; listL++)
+            msg.Write((byte)45);
+            for (int list_length = 0; list_length < player_list.Length; list_length++)
             {
-                if (player_list[listL] == null)
+                if (player_list[list_length] == null)
                 {
-                    msg.Write((byte)listL); 
+                    msg.Write((byte)list_length);
+                    for (int i = 0; i < list_length; i++)
+                    {
+                        if (player_list[i] != null)
+                        {
+                            msg.Write(player_list[i].myID);
+                            msg.Write(player_list[i].hp);
+                            msg.Write(player_list[i].armorTier);
+                            msg.Write(player_list[i].armorTapes);
+                            msg.Write(player_list[i].currWalkMode);
+                            msg.Write(player_list[i].drinkies);
+                            msg.Write(player_list[i].tapies);
+                        }
+                        else { break; }
+                    }
+                    server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
                     break;
                 }
             }
-            //before checked for nulls to end loop. now should just be fine to go through the whole length of listL
-            for (int i = 0; i < listL; i++)
-            {
-                if (player_list[i] != null)
-                {
-                    msg.Write(player_list[i].myID);
-                    msg.Write(player_list[i].hp);
-                    msg.Write(player_list[i].armorTier);
-                    msg.Write(player_list[i].armorTapes);
-                    msg.Write(player_list[i].currWalkMode);
-                    msg.Write(player_list[i].drinkies);
-                    msg.Write(player_list[i].tapies);
-                }
-                else { break; }
-            }
-            server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
-        private void test_SENDDUMMY()
+        private void send_dummy()
         {
             NetOutgoingMessage dummy = server.CreateMessage();
             dummy.Write((byte)97);
@@ -272,19 +268,19 @@ namespace WC.SARS
         private void updateEveryonePingList()
         {
             NetOutgoingMessage pings = server.CreateMessage();
-            byte i = 0;
-            for (i = 0; i < player_list.Length; i++)
+            pings.Write((byte)112); //this is new as of 3/14/22. this was not here before... for some reason?
+            for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
                 {
-                    pings.Write(i);
+                    pings.Write((byte)i);
+                    for (int j = 0; j < i; j++)
+                    {
+                        pings.Write(player_list[j].myID);
+                        pings.Write((short)4);//ping in ms -- have to like... actually calculate this
+                    }
                     break;
                 }
-            }
-            for (byte j = 0; j < i; j++)
-            {
-                pings.Write(player_list[j].myID);
-                pings.Write((short)420);//ping in ms
             }
             server.SendToAll(pings, NetDeliveryMethod.ReliableOrdered);
         }
@@ -360,6 +356,7 @@ namespace WC.SARS
                 }
             }
         }
+        //can be simplified with eventCheck
         private void checkGasTime()
         {
             //basically a copy and paste from checkStartTimer(). Any inaccuracies/inefficency there also appear here.
@@ -377,7 +374,6 @@ namespace WC.SARS
             }
             else if (gasAdvanceTimer == 0)
             {
-                //this is so it waits an extra second
                 if (prevTime != DateTime.Now.Second)
                 {
                     gasAdvanceTimer = -1;
@@ -389,7 +385,7 @@ namespace WC.SARS
                 }
             }
         }
-
+        //can be simplified with gasCheck
         private void advanceTimeAndEventCheck()
         {
             //basically a copy and paste from checkStartTimer(). Any inaccuracies/inefficency there also appear here.
@@ -906,9 +902,7 @@ namespace WC.SARS
                 gunskinGunID[l] = msg.ReadInt16();
                 gunSkinIndex[l] = msg.ReadByte();
             }
-
-            //find an empty slot
-            sortPlayersListNull(); //need to find an empty i
+            if (!isSorted && !isSorting) { sortPlayersListNull(); } //make sure to sort if needed
             //TODO: I think there is a better way of finding the ID that is available and stuff but not sure how
             for (short i = 0; i < player_list.Length; i++)
             {
@@ -917,6 +911,24 @@ namespace WC.SARS
                     player_list[i] = new Player(availableIDs[0], charID, umbrellaID, graveID, deathEffectID, emoteIDs, hatID, glassesID, beardID, clothesID, meleeID, gunSkinCount, gunskinGunID, gunSkinIndex, steamName, msg.SenderConnection);
                     sendClientMatchInfo2Connect(availableIDs[0], msg.SenderConnection);
                     availableIDs.RemoveAt(0);
+                    //find if person who connected is mod, admin, or whatever!
+                    try
+                    {
+                        //should not be hard-codeded.
+                        switch (steamID)
+                        {
+                            case 0:
+                                player_list[i].isDev = true;
+                                player_list[i].isMod = true;
+                                player_list[i].isFounder = true;
+                                break;
+
+                        }
+                    }
+                    catch (Exception exceptlol)
+                    {
+                        Logger.Failure("absolute blunder doing... IDK!\n" + exceptlol);
+                    }
                     break;
                 }
             }
@@ -1052,11 +1064,14 @@ namespace WC.SARS
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
         }
 
-        //25 > 26/94/106 -- is A HUGE mess
+        /// <summary>
+        /// Handles a chat message the server has received.
+        /// </summary>
+        /// <param name="message"></param>
         private void serverHandleChatMessage(NetIncomingMessage message)
         {
             Logger.Header("Chat message. Wonderful!");
-            //this can either be a command, or an actual chat message. let's find out if it was a command
+            //this is terrible. we are aware. have fun.
             if (message.PeekString().StartsWith("/"))
             {
 
@@ -1291,10 +1306,11 @@ namespace WC.SARS
                             {
                                 NetOutgoingMessage cParaMsg = server.CreateMessage();
                                 cParaMsg.Write((byte)109);
-                                cParaMsg.Write((short)0);
+                                cParaMsg.Write(getPlayerID(message.SenderConnection));
+                                //cParaMsg.Write((short)0);
                                 cParaMsg.Write(isDive);
                                 server.SendToAll(cParaMsg, NetDeliveryMethod.ReliableOrdered);
-                                responseMsg = $"Parachute Mode Changed. Dive: {isDive}";
+                                responseMsg += $"Parachute Mode Changed. Dive: {isDive}";
                             }
                             else
                             {
@@ -1497,14 +1513,6 @@ namespace WC.SARS
         {
             Logger.Header("--  Vehicle Hit Player  --");
             Logger.Basic($"Target Player ID: {message.ReadInt16()}\nSpeed: {message.ReadFloat()}");
-            //It isn't that the bottom code doesn't work, it is just that the "correct" speed value needs to be found.
-
-            /*
-            //client SENDS this
-            NetOutgoingMessage netOutgoingMessage = GameServerManager.netClient.CreateMessage();
-            netOutgoingMessage.Write(60);
-            netOutgoingMessage.Write(targetPlayerID);
-            netOutgoingMessage.Write(speed);*/
             Player plrA = player_list[getPlayerArrayIndex(message.SenderConnection)];
             NetOutgoingMessage vehicleHit = server.CreateMessage();
             vehicleHit.Write((byte)61); //Message #61
@@ -1583,9 +1591,6 @@ namespace WC.SARS
         /// <summary>
         /// Sends to everyone in the match a player who has started to tape along with their position.
         /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="posX"></param>
-        /// <param name="posY"></param>
         private void serverSendPlayerStartedTaping(NetConnection sender, float posX, float posY)
         {
             Player plr = player_list[getPlayerArrayIndex(sender)];
@@ -1609,7 +1614,7 @@ namespace WC.SARS
             if (!isSorting)
             {
                 isSorting = true;
-                Player[] temp_plrlst = new Player[player_list.Length]; //yeah I mean I think the game caps it at 64 but you know it's fine
+                Player[] temp_plrlst = new Player[player_list.Length];
                 int newIndex = 0;
                 for (int i = 0; i < player_list.Length; i++)
                 {
