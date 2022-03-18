@@ -22,6 +22,8 @@ namespace WC.SARS
         //mmmmmmmmmmmmmmmmmmmmmmmmmmmmm
         public bool DEBUG_ENABLED;
         public bool ANOYING_DEBUG1;
+        private bool doWinCheck = false;
+        private bool shouldUpdateAliveCount = true;
 
         public Match(int port, string ip, bool db, bool annoying)
         {
@@ -46,8 +48,8 @@ namespace WC.SARS
             config.PingInterval = 22f;
             config.LocalAddress = System.Net.IPAddress.Parse(ip);
             config.Port = port;
-            server = new NetServer(config); // todo make sure server actually starts before having to launch update thread?
-            server.Start(); // ^ pretty sure I did that already :33
+            server = new NetServer(config); // todo make sure server actually starts before having to launch update thread? || believe that is done
+            server.Start();
             updateThread.Start();
             NetIncomingMessage msg;
             while (true)
@@ -125,16 +127,21 @@ namespace WC.SARS
                                 {
                                     float pingTime = msg.ReadFloat();
                                     Logger.Basic($"  -> Ping time: {pingTime}");
+                                    Logger.Basic($"  -> Remote Time Offset: {msg.SenderConnection.RemoteTimeOffset}");
+                                    Logger.Basic($"  -> Average Round Time: {msg.SenderConnection.AverageRoundtripTime}");
+                                try
+                                    {
+                                        player_list[getPlayerArrayIndex(msg.SenderConnection)].lastPingTime = pingTime; //not actually ping whoopsies
+                                }
+                                    catch
+                                    {
+                                        Logger.Failure($"  -> Connection {msg.SenderEndPoint} does not exist. Cannot write their last ping time. (likely not yet fully connected)");
+                                    }
                                 }
                                 catch
                                 {
                                     Logger.Failure("no float to read?");
                                 }
-
-                                //NetOutgoingMessage pingBack = server.CreateMessage();
-                                //pingBack.Write((byte)97);
-                                //pingBack.Write("well, you shouldn't really be getting this");
-                                //server.SendMessage(pingBack, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
                             break;
                         default:
                             Logger.Failure("Unhandled type: " + msg.MessageType);
@@ -150,6 +157,13 @@ namespace WC.SARS
         private void serverUpdateThread() //where most things get updated...
         {
             Logger.Success("Server update thread started.");
+
+            if (!doWinCheck)
+            {
+                Logger.Warn("\nWARNING -- doWinCheck is set to FALSE. The server will NOT check for a winner without intervention.");
+                Logger.Warn("Use '/togglewin' to reactivate the check.\n");
+            }
+
             //lobby
             while (!matchStarted)
             {
@@ -180,7 +194,12 @@ namespace WC.SARS
             while (matchStarted)
             {
                 if (!isSorted) { sortPlayersListNull(); }
+
                 send_dummy();
+
+                //check for win
+                if (shouldUpdateAliveCount && doWinCheck) { update_checkAliveorWin(); }
+
                 //updating player info to all people in the match
                 updateEveryoneOnPlayerPositions();
                 updateEveryoneOnPlayerInfo();
@@ -277,7 +296,7 @@ namespace WC.SARS
         private void updateEveryonePingList()
         {
             NetOutgoingMessage pings = server.CreateMessage();
-            pings.Write((byte)112); //this is new as of 3/14/22. this was not here before... for some reason?
+            pings.Write((byte)112);
             for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
@@ -286,7 +305,7 @@ namespace WC.SARS
                     for (int j = 0; j < i; j++)
                     {
                         pings.Write(player_list[j].myID);
-                        pings.Write((short)4);//ping in ms -- have to like... actually calculate this
+                        pings.Write( (short)(player_list[j].lastPingTime*1000f)); //this appears to be correct.
                     }
                     break;
                 }
@@ -340,6 +359,27 @@ namespace WC.SARS
                 else { break; }
             }
         }
+
+        private void update_checkAliveorWin()
+        {
+            shouldUpdateAliveCount = false;
+            List<short> aIDs = new List<short>(player_list.Length);
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null && player_list[i].isAlive)
+                {
+                    aIDs.Add(player_list[i].myID);
+                }
+            }
+            if (aIDs.Count == 1)
+            {
+                NetOutgoingMessage congratulationsyouvewoncongratulationsyouvewoncongratulationsyouvewon = server.CreateMessage();
+                congratulationsyouvewoncongratulationsyouvewoncongratulationsyouvewon.Write((byte)9);
+                congratulationsyouvewoncongratulationsyouvewoncongratulationsyouvewon.Write(aIDs[0]);
+                server.SendToAll(congratulationsyouvewoncongratulationsyouvewoncongratulationsyouvewon, NetDeliveryMethod.ReliableUnordered);
+            }
+        }
+
         private void checkStartTime()
         {
             if (timeUntilStart  > 0)
@@ -466,9 +506,9 @@ namespace WC.SARS
         private void HandleMessage(NetIncomingMessage msg)
         {
             byte b = msg.ReadByte();
-            if (b != 14) {
-                Logger.DebugServer(b.ToString());
-            }
+            //if (b != 14) {
+                //Logger.DebugServer(b.ToString());
+            //}
 
             switch (b)
             {
@@ -547,11 +587,11 @@ namespace WC.SARS
                     short attackID = msg.ReadInt16();//short -- attackID
                     byte sendProjectileAnglesArrayLength = msg.ReadByte();//byte -- projectileAngles.Length
 
-
+                    int indexID = getPlayerArrayIndex(msg.SenderConnection);
                     NetOutgoingMessage plrShot = server.CreateMessage();
                     plrShot.Write((byte)17);
-                    plrShot.Write(getPlayerID(msg.SenderConnection)); //playerID of shot
-                    plrShot.Write((ushort)1); //playerPing figure this out later I don't give a darn right now!
+                    plrShot.Write(player_list[indexID].myID); //ID of the player who made the shot
+                    plrShot.Write((ushort)(player_list[indexID].lastPingTime * 1000f)); //before it was stated "I don't give a darn!" because ping would always be set to 1. now it's just confuzing as to whether this truly works
                     plrShot.Write(weaponID); //weaponID from shot
                     plrShot.Write(slotIndex); //slotIndex
                     plrShot.Write(attackID); //attackID
@@ -665,6 +705,15 @@ namespace WC.SARS
                     player_list[vehPlrEx].vehicleID = -1;
                     server.SendToAll(exitVehicle, NetDeliveryMethod.ReliableOrdered); //yes it's that simple
                     break;
+                //client - Send Spectating Player ?
+                case 44:
+                    /* msg.ReadFloat() // cam X
+                     * msg.ReadFloat() // cam Y
+                     * msg.ReadInt16() // player id (who they're watching)
+                     */
+                    //
+                    break;
+
                 //someone started healing...
                 case 47:
                     serverSendPlayerStartedHealing(msg.SenderConnection, msg.ReadFloat(), msg.ReadFloat());
@@ -991,8 +1040,58 @@ namespace WC.SARS
             msg.Write(projID);
             msg.Write((byte)0);
             msg.Write((short)-1);
-
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
+
+            /* there needs to be more code and junk to find out how much a person should actually be damaged for.
+             * like client for the most part just sends weaponIDs / vehicleIDs, expecting the server to know which is which
+             * however, this server does not know which is which. figure that out later I guess.
+             */
+            try
+            {
+                Player shotPlayer = null;
+                for (int i = 0; i < player_list.Length; i++)
+                {
+                    if (player_list != null && player_list[i].myID == hitPlayerID)
+                    {
+                        shotPlayer = player_list[i];
+                        Logger.Success($"Located player successfully. ID: {shotPlayer.myID} ({shotPlayer.myName})");
+                        //calculate the distance between the player that was shot, and where it actually hit.
+                        // (SPOILER) this is not a good way of figuring out whether this is a valid shot/to damage
+                        double num = Math.Sqrt(Math.Pow((hitX - shotPlayer.position_X), 2) + Math.Pow((hitY - shotPlayer.position_Y), 2));
+                        Logger.Warn($"Calculated distance: {num}");
+                        if (num <= 20)
+                        {
+                            Logger.Warn($"Shot Player HP: {shotPlayer.hp}");
+                            shotPlayer.hp -= 10;
+
+                            //todo: fix -- edited this 3/17/22
+                            Logger.Warn($"Shot Player NEW HP: {shotPlayer.hp}");
+                            if (shotPlayer.hp == 0)
+                            {
+                                NetOutgoingMessage kill = server.CreateMessage();
+                                kill.Write((byte)15);               // Message Type 15
+
+                                kill.Write(shotPlayer.myID);        //Dying player ID
+                                kill.Write(shotPlayer.position_X);  //Dying Player X
+                                kill.Write(shotPlayer.position_Y);  //Dying Player Y
+
+                                kill.Write((short)-3);              //Killer's Player ID
+                                kill.Write((short)-1);              //Killer's Weapon ID
+
+                                server.SendToAll(kill, NetDeliveryMethod.ReliableSequenced);
+                                shotPlayer.isAlive = false;
+                                shouldUpdateAliveCount = true;
+                            }
+                        }
+                        break;
+                    }
+                }
+                Logger.Failure("Did not find... the player that was hit??");
+            }
+            catch (Exception exc)
+            {
+                Logger.Failure(exc.ToString());
+            }
         }
 
         /// <summary>
@@ -1176,7 +1275,7 @@ namespace WC.SARS
                             }
                             else
                             {
-                                responseMsg = $"The game *should* begin in {timeUntilStart} seconds.";
+                                responseMsg = $"The game will begin in {timeUntilStart} seconds.";
                                 NetOutgoingMessage sTimeMsg = server.CreateMessage();
                                 sTimeMsg.Write((byte)43);
                                 sTimeMsg.Write(timeUntilStart);
@@ -1328,12 +1427,100 @@ namespace WC.SARS
                         server.SendToAll(LOL, NetDeliveryMethod.ReliableUnordered);
                         responseMsg = "All good. Have fun lol";
                         break;
+                    case "/pray":
+                        NetOutgoingMessage banan = server.CreateMessage();
+                        banan.Write((byte)110);
+                        banan.Write(getPlayerID(message.SenderConnection)); //player
+                        banan.Write(0f);//interval
+                        banan.Write((byte)255);
+                        int count = 0;
+                        for (int i = 0; i < 8; i++)
+                        {
+                            for (int j = 0; j < 32; j++)
+                            {
+                                count++;
+                                if (count != 256)
+                                {
+                                    banan.Write((float)(3683f + j)); //x 
+                                    banan.Write((float)(3549f - i)); //y
+                                }
+                            }
+                        }
+                        Console.WriteLine(count);
+                        banan.Write((byte)1);
+                        banan.Write(getPlayerID(message.SenderConnection));
+
+                        server.SendToAll(banan, NetDeliveryMethod.ReliableUnordered);
+                        responseMsg = "Praise Banan.";
+                        break;
+                    case "/kill":
+                        //just wanted to test. this is very very broken just like the rest of the """"commands"""".
+                        if (command.Length > 1)
+                        {
+                            if (tryFindPlayerIDbyName(command[1], out short sPlayerID) || short.TryParse(command[1], out sPlayerID))
+                            {
+                                if (tryFindArrayIndexByID(sPlayerID, out int index))
+                                {
+                                    Player killPlayer = player_list[index]; //is this worth it?
+                                    NetOutgoingMessage kill = server.CreateMessage();
+                                    kill.Write((byte)15);               // Message Type 15
+
+                                    kill.Write(killPlayer.myID);        //Dying player ID
+                                    kill.Write(killPlayer.position_X);  //Dying Player X
+                                    kill.Write(killPlayer.position_Y);  //Dying Player Y
+
+                                    kill.Write((short)-3);              //Killer's Player ID
+                                    kill.Write((short)-1);              //Killer's Weapon ID
+
+                                    server.SendToAll(kill, NetDeliveryMethod.ReliableSequenced);
+                                    responseMsg = $"Killed Player {sPlayerID} ({killPlayer.myName}).";
+                                    Logger.Basic($"Killed player {sPlayerID} ({killPlayer.myName}).");
+                                }
+                                else
+                                { responseMsg = $"Could not locate player '{command[1]}'."; }
+                            }
+                            else { responseMsg = $"Could not locate player '{command[1]}'."; }
+                        }
+                        else { responseMsg = "Not enough arguments provided."; }
+                        break;
+
                     case "/removeweapons":
                         NetOutgoingMessage rmMsg = server.CreateMessage();
                         rmMsg.Write((byte)125);
                         rmMsg.Write(getPlayerID(message.SenderConnection));
                         server.SendToAll(rmMsg, NetDeliveryMethod.ReliableUnordered);
                         responseMsg = $"Weapons removed for {player_list[getPlayerArrayIndex(message.SenderConnection)].myName}";
+                        break;
+                    case "/ghost":
+                        //TODO : remove or make better command -- testing only
+                        NetOutgoingMessage ghostMsg = server.CreateMessage();
+                        ghostMsg.Write((byte)105);
+                        server.SendMessage(ghostMsg, message.SenderConnection, NetDeliveryMethod.ReliableUnordered);
+                        break;
+                    case "/rain":
+                        if (command.Length > 1)
+                        {
+                            if (float.TryParse(command[1], out float duration))
+                            {
+                                NetOutgoingMessage rainTime = server.CreateMessage();
+                                rainTime.Write((byte)35);
+                                rainTime.Write(duration);
+                                server.SendToAll(rainTime, NetDeliveryMethod.ReliableSequenced);
+                                responseMsg = $"It's raining it's pouring the old man is snoring! (rain duration: ~{duration} seconds)";
+                            }
+                            else
+                            {
+                                responseMsg = $"Invalid duration '{command[1]}'";
+                            }
+                        }
+                        else
+                        {
+                            responseMsg = "Please enter a duration amount.";
+                        }
+                        break;
+                    case "/togglewin":
+                        doWinCheck = !doWinCheck;
+                        responseMsg = $"server var, doWinCheck = {doWinCheck}";
                         break;
 
                     default:
@@ -1626,7 +1813,86 @@ namespace WC.SARS
             }
         }
 
+
+
+        //TOOD: find out if can make test for if searched ID/whatever exists, and THEN output?
+        /// <summary>
+        /// Traverses the player list array in 
+        /// </summary>
+        /// <returns>True if ID is found in the array; False if otherwise.</returns>
+        private bool tryFindPlayerIDbyName(string searchName, out short outID)
+        {
+            //make sure is lower as well?
+            searchName = searchName.ToLower();
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null && player_list[i].myName.ToLower() == searchName)
+                {
+                    outID = player_list[i].myID;
+                    return true;
+                }
+            }
+            outID = -1;
+            return false;
+        }
+        /// <summary>
+        /// Traverses the player list array in search of the index which the provided Player ID is located.
+        /// </summary>
+        /// <returns>True if ID is found in the array; False if otherwise.</returns>
+        private bool tryFindArrayIndexByID(int searchID, out int returnedIndex)
+        {
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null && player_list[i].myID == searchID) //searchID is int, myID is short.
+                {
+                    returnedIndex = player_list[i].myID;
+                    return true;
+                }
+            }
+            returnedIndex = -1;
+            return false;
+        }
+
+
         //Helper Functions to get playerID
+        /// <summary>
+        /// Finds the ID of a player with a given name. Returns the first found instance. Returns -1 if the player cannot be found.
+        /// </summary>
+        private short getPlayerIDwithUsername(string searchName)
+        {
+            short retID = -1;
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null && player_list[i].myName == searchName)
+                {
+                    retID = player_list[i].myID;
+                }
+            }
+            return retID;
+        }
+        /// <summary>
+        /// Finds the array index of a user with the provided ID. Returns -1 if the player cannot be found.
+        /// </summary>
+        private int findArrayIndexWithID(short searchID)
+        {
+            int retID = -1;
+            Logger.Success("working... 1");
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null && player_list[i].myID == searchID) //searchID is int, myID is short.
+                {
+                    retID = player_list[i].myID;
+                    break;
+                }
+            }
+            if (retID == -1) { Logger.Failure("NO ONE WAS FOUND WITH THAT INDEX. RET ID IS -1 (NO ONE FOUND)"); }
+            return retID;
+        }
+
+        /// <summary>
+        /// Grabs the ID of a player with the provided NetConnection. If a player is unable to be located "-1" is returned.
+        /// </summary>
+        //todo: make sure to fix along with getPlayerArrayIndex (have not checked in a while)
         private short getPlayerID(NetConnection thisSender)
         {
             short id = -1;
@@ -1642,7 +1908,7 @@ namespace WC.SARS
                 }
             }
             return id;
-        }//Helper Function to get playerID
+        }
         private short getPlayerArrayIndex(NetConnection thisSender)
         {
             short id = -1;
