@@ -8,6 +8,7 @@ namespace WC.SARS
         {
             Logger.Basic("<< Super Animal Royale Server  >>");
             Logger.Header("Super Animal Royale Version: 0.90.2\n");
+
             if (args.Length > 0)
             {
                 Match m = new Match(int.Parse(args[1]), args[0], false, false);
@@ -19,7 +20,7 @@ namespace WC.SARS
                 Logger.Warn("If you know, you know. ['Y' OR 'N' key]");
                 while (runSetup)
                 {
-                    switch (Console.ReadKey().Key)
+                    switch (Console.ReadKey(true).Key)
                     {
                         case ConsoleKey.Y:
                             Logger.Basic("attempting to start a server! (port: 4206; local address: 192.168.1.13)");
@@ -31,7 +32,7 @@ namespace WC.SARS
                             //Match match1 = new Match(7642, "10.0.0.4", false, false);
                             break;
                         default:
-                            Logger.Failure("invalid key... please try again");
+                            Logger.Failure($"Invalid key. Please try again");
                             Logger.Warn("If you know, you know. ['Y' OR 'N' key]");
                             break;
                     }
