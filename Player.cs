@@ -26,6 +26,7 @@ namespace WC.SARS
         public byte[] gunskinValue; // Gunskin3 IDK //value
 
         //Updated Regularly...
+        public float lastPingTime = 0f;
         public float mouseAngle = 0f;
         public float position_X = 508.7f; 
         public float position_Y = 496.7f;
@@ -47,6 +48,7 @@ namespace WC.SARS
         public byte tapies = 0; //amount of duct tape the player currently has. drinkies and tapies was named by me. I got bored.
         public bool isHealing = false;
         public bool isTaping = false;
+        public bool isAlive = true;
 
         //simple solution to checking whether a person deserves the colors they get
         public ulong steamID = 0;
@@ -80,5 +82,23 @@ namespace WC.SARS
             this.gunskinValue= skinValues;
             this.sender = senderAddress;
         }
+
+        /* Death Notes:
+         * Weapon: 
+         * 0 -- Melee?
+         * -1  -- nothing
+         * -2 == Killfeed Hammer
+         * -3 == Killfeed Explosiion lol
+         * -4 -- nothing
+         * 
+         * 
+         * Killing Player:
+         * anything 0+ = player
+         * -1 -- nothing
+         * -2 == Gas
+         * -3 == Banan Gods (/killed)
+         * 
+         */
+
     }
 }

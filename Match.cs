@@ -3,6 +3,9 @@ using System.Threading;
 using System.Collections.Generic;
 using Lidgren.Network;
 
+using System.Diagnostics;
+
+
 namespace WC.SARS
 {
     class Match
@@ -847,7 +850,7 @@ namespace WC.SARS
         {
             NetOutgoingMessage acceptMsg = server.CreateMessage();
             acceptMsg.Write((byte)2);
-            acceptMsg.Write(true); //todo -- should definitely check if the player is banned or whatnot.
+            acceptMsg.Write(true); //todo - maaaybe actually try authenticating the player?
             server.SendMessage(acceptMsg, client, NetDeliveryMethod.ReliableOrdered);
             Logger.Success($"Server sent {client.RemoteEndPoint} their accept message!");
         }
@@ -884,7 +887,7 @@ namespace WC.SARS
             }
             if (!isSorted && !isSorting) { sortPlayersListNull(); } //make sure to sort if needed
             //TODO: I think there is a better way of finding the ID that is available and stuff but not sure how
-            for (short i = 0; i < player_list.Length; i++)
+            for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
                 { 
@@ -947,6 +950,9 @@ namespace WC.SARS
         }
 
         //message 5 > send10
+        /// <summary>
+        /// Sends a message to everyone in the lobby with data about everyone in the lobby. Likely only called once someone connects so everyone knows of the new player.
+        /// </summary>
         private void sendPlayerCharacters()
         {
             Logger.Header($"Beginning to send player characters to everyone once again.");
@@ -961,18 +967,18 @@ namespace WC.SARS
                 }
             }
 
-            // loop through the list of all of the players in the match \\
+            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
             for (short i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] != null)
                 {
                     Logger.Basic($"Sending << player_list[{i}] >>");
                     //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                    sendPlayerPosition.Write(i); //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(player_list[i].charID); //charIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].umbrellaID); //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].gravestoneID); //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].deathEffectID); //explosionIndex [SHORT]
+                    sendPlayerPosition.Write(i);                             //num4 / myAssignedPlayerID? [SHORT]
+                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
                     for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
                     {
                         Logger.Warn("Loop Ammount: " + j);
@@ -1139,7 +1145,7 @@ namespace WC.SARS
                                 case "3":
 
                                     break;*/
-            default:
+                                default:
                                     responseMsg = $"Invalid help entry '{command[1]}'.\nPlease see '/help' for a list of usable commands.";
                                     break;
                             }
@@ -1155,7 +1161,7 @@ namespace WC.SARS
                                 "\n/moveplayer {playerID} {X} {Y}" +
                                 "\nType '/help [command]' for more information";
                         }
-                        
+
                         break;
                     case "/heal":
                         Logger.Success("user has heal command");
@@ -1302,7 +1308,7 @@ namespace WC.SARS
                                 gtime = float.Parse(command[7]);
 
                                 NetOutgoingMessage gCircCmdMsg = server.CreateMessage();
-                                gCircCmdMsg.Write( (byte)33 );
+                                gCircCmdMsg.Write((byte)33);
                                 gCircCmdMsg.Write(gx1); gCircCmdMsg.Write(gy1);
                                 gCircCmdMsg.Write(gx2); gCircCmdMsg.Write(gy2);
                                 gCircCmdMsg.Write(gr1); gCircCmdMsg.Write(gr2);
@@ -1351,7 +1357,7 @@ namespace WC.SARS
                         }
                         else
                         {
-                            responseMsg = $"Insufficient amount of arguments provided. This command takes 1. Given: {command.Length-1}.";
+                            responseMsg = $"Insufficient amount of arguments provided. This command takes 1. Given: {command.Length - 1}.";
                         }
                         break;
                     case "/startshow":
@@ -1380,11 +1386,11 @@ namespace WC.SARS
                         if (command.Length > 1)
                         {
                             short forceID;
-                            if(short.TryParse(command[1], out forceID))
+                            if (short.TryParse(command[1], out forceID))
                             {
                                 if (!(forceID < 0) && !(forceID > 64))
                                 {
-                                    for(int fl = 0; fl < player_list.Length; fl++)
+                                    for (int fl = 0; fl < player_list.Length; fl++)
                                     {
                                         if (player_list[fl] != null && player_list[fl]?.myID == forceID)
                                         {
@@ -1521,6 +1527,70 @@ namespace WC.SARS
                     case "/togglewin":
                         doWinCheck = !doWinCheck;
                         responseMsg = $"server var, doWinCheck = {doWinCheck}";
+                        break;
+
+                    //DEFINITELY only for testing. if this is left in. well, what are you doing with your life?
+                    case "/bringthepain":
+
+                        Logger.Header("Absolute insanity is about to occur.");
+                        int l;
+                        int iterations = 4000;
+                        int testRepeat = 20;
+                        double stopWatchAtime = 0.0;
+                        double stopWatchBtime = 0.0;
+                        double stopWatchCtime = 0.0;
+                        double stopWatchDtime = 0.0;
+                        Stopwatch stopWatch = new Stopwatch();
+
+                        for (int i = 0; i < testRepeat; i++) {
+                        //Logger.Warn("Method A");
+                        
+                        stopWatch.Reset();
+                        stopWatch.Start();
+                        for (l = 0; l < iterations; l++)
+                        {
+                            test_sendA();
+                        }
+                        stopWatch.Stop();
+                        stopWatchAtime += stopWatch.Elapsed.TotalMilliseconds;
+                        //Logger.Basic($"Stopwatch time for [A]:  {stopWatch.Elapsed}");
+
+                        //Logger.Warn("Method B");
+                        stopWatch.Reset();
+                        stopWatch.Start();
+                        for (l = 0; l < iterations; l++)
+                        {
+                            test_sendB();
+                        }
+                        stopWatch.Stop();
+                        stopWatchBtime += stopWatch.Elapsed.TotalMilliseconds;
+                        //Logger.Basic($"Stopwatch time for [B]:  {stopWatch.Elapsed}");
+
+                        //Logger.Warn("Method C");
+                        stopWatch.Reset();
+                        stopWatch.Start();
+                        for (l = 0; l < iterations; l++)
+                        {
+                            test_sendC();
+                        }
+                        stopWatch.Stop();
+                        stopWatchCtime += stopWatch.Elapsed.TotalMilliseconds;
+                        //Logger.Basic($"Stopwatch time for [C]:  {stopWatch.Elapsed}");
+
+                        //Logger.Warn("Method D");
+                        stopWatch.Reset();
+                        stopWatch.Start();
+                        for (l = 0; l < iterations; l++)
+                        {
+                            test_sendD();
+                        }
+                        stopWatch.Stop();
+                        stopWatchDtime += stopWatch.Elapsed.TotalMilliseconds;
+                        //Logger.Basic($"Stopwatch time for [D]:  {stopWatch.Elapsed}");
+                        }
+
+                        Logger.Basic($"\nStopWatch A time: {stopWatchAtime/testRepeat}\nStopWatch B time: {stopWatchBtime / testRepeat}\nStopWatch C time: {stopWatchCtime / testRepeat}\nStopWatch D time: {stopWatchDtime / testRepeat}\n");
+                        responseMsg = "I... I think I did it... j-just check the console...";
                         break;
 
                     default:
@@ -1731,6 +1801,304 @@ namespace WC.SARS
             msg.Write(plr.myID);
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
+
+
+        #region TEST_METHODS
+        /// <summary>
+        /// send player spawn -- Test A -- literally just the original send player spawn method without print statements.
+        /// </summary>
+        private void test_sendA()
+        {
+            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
+            sendPlayerPosition.Write((byte)10);
+            for (byte i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] == null)
+                {
+                    sendPlayerPosition.Write(i); // Ammount of times to loop (for amount of players, you know?
+                    break;
+                }
+            }
+            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
+            for (short i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null)
+                {
+                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
+                    sendPlayerPosition.Write(i);                             //num4 / myAssignedPlayerID? [SHORT]
+                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
+                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
+                    {
+                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
+                    }
+                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
+
+                    //Really Confusing Loop
+                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
+                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
+                    {
+                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
+                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
+                    }
+
+                    //Positioni?
+                    sendPlayerPosition.Write(player_list[i].position_X);
+                    sendPlayerPosition.Write(player_list[i].position_Y);
+
+                    //sendPlayerPosition.Write((float)508.7); //x2
+                    //sendPlayerPosition.Write((float)496.7); //y2
+                    sendPlayerPosition.Write(player_list[i].myName); //playername
+
+                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
+                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
+                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
+                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
+                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
+                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
+                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
+                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
+                     */
+                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
+                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
+                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
+                    sendPlayerPosition.Write((short)450); //accLvl -- short
+                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
+                    //sendPlayerPosition.Write((short)25); //teammate ID
+
+                }
+                else { break; }// break out of loop
+            }
+            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+        }
+        /// <summary>
+        /// send player spawn -- Test B -- for loops use INT i = 0 as opposite to SHORT i or BYTE i
+        /// </summary>
+        private void test_sendB()
+        {
+            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
+            sendPlayerPosition.Write((byte)10);
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] == null)
+                {
+                    sendPlayerPosition.Write((byte)i); // Ammount of times to loop (for amount of players, you know?
+                    break;
+                }
+            }
+            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null)
+                {
+                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
+                    sendPlayerPosition.Write((short)i);                             //num4 / myAssignedPlayerID? [SHORT]
+                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
+                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
+                    {
+                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
+                    }
+                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
+                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
+
+                    //Really Confusing Loop
+                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
+                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
+                    {
+                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
+                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
+                    }
+
+                    //Positioni?
+                    sendPlayerPosition.Write(player_list[i].position_X);
+                    sendPlayerPosition.Write(player_list[i].position_Y);
+
+                    //sendPlayerPosition.Write((float)508.7); //x2
+                    //sendPlayerPosition.Write((float)496.7); //y2
+                    sendPlayerPosition.Write(player_list[i].myName); //playername
+
+                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
+                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
+                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
+                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
+                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
+                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
+                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
+                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
+                     */
+                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
+                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
+                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
+                    sendPlayerPosition.Write((short)450); //accLvl -- short
+                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
+                    //sendPlayerPosition.Write((short)25); //teammate ID
+
+                }
+                else { break; }// break out of loop
+            }
+            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+        }
+        /// <summary>
+        /// send player spawn -- Test C -- similar to Test B, however local variable thisPlr is used instead of player_list[i] to write data
+        /// </summary>
+        private void test_sendC()
+        {
+            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
+            sendPlayerPosition.Write((byte)10);
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] == null)
+                {
+                    sendPlayerPosition.Write((byte)i); // Ammount of times to loop (for amount of players, you know?
+                    break;
+                }
+            }
+            Player thisPlr;
+            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
+            for (int i = 0; i < player_list.Length; i++)
+            {
+                if (player_list[i] != null)
+                {
+                    thisPlr = player_list[i];
+                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
+                    sendPlayerPosition.Write(thisPlr.myID);                             //num4 / myAssignedPlayerID? [SHORT]
+                    sendPlayerPosition.Write(thisPlr.charID);         //charIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.umbrellaID);     //umbrellaIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.gravestoneID);   //gravestoneIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.deathEffectID);  //explosionIndex [SHORT]
+                    for (int j = 0; j < thisPlr.emoteIDs.Length; j++)
+                    {
+                        sendPlayerPosition.Write(thisPlr.emoteIDs[j]); //emoteIndex [SHORT]
+                    }
+                    sendPlayerPosition.Write(thisPlr.hatID); //hatIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.glassesID); //glassesIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.beardID); //beardIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.clothesID); //clothesIndex [SHORT]
+                    sendPlayerPosition.Write(thisPlr.meleeID); //meleeIndex [SHORT]
+
+                    //Really Confusing Loop
+                    sendPlayerPosition.Write(thisPlr.gunSkinCount);
+                    for (byte l = 0; l < thisPlr.gunSkinCount; l++)
+                    {
+                        sendPlayerPosition.Write(thisPlr.gunskinKey[l]); //Unknown Key
+                        sendPlayerPosition.Write(thisPlr.gunskinValue[l]); //Unknown Value
+                    }
+
+                    //Positioni?
+                    sendPlayerPosition.Write(thisPlr.position_X);
+                    sendPlayerPosition.Write(thisPlr.position_Y);
+
+                    //sendPlayerPosition.Write((float)508.7); //x2
+                    //sendPlayerPosition.Write((float)496.7); //y2
+                    sendPlayerPosition.Write(thisPlr.myName); //playername
+
+                    sendPlayerPosition.Write(thisPlr.currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
+                    sendPlayerPosition.Write(thisPlr.equip1); //equip -- int16
+                    sendPlayerPosition.Write(thisPlr.equip2); //equip2 - int16
+                    sendPlayerPosition.Write(thisPlr.equip1_rarity); // equip rarty byte
+                    sendPlayerPosition.Write(thisPlr.equip2_rarity); // equip rarity 2 -- byte
+                    sendPlayerPosition.Write(thisPlr.curEquipIndex); // current equip index -- byte
+                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
+                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
+                     */
+                    sendPlayerPosition.Write(thisPlr.isDev); //isDev
+                    sendPlayerPosition.Write(thisPlr.isMod); //isMod
+                    sendPlayerPosition.Write(thisPlr.isFounder); //isFounder
+                    sendPlayerPosition.Write((short)450); //accLvl -- short
+                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
+                    //sendPlayerPosition.Write((short)25); //teammate ID
+
+                }
+                else { break; }// break out of loop
+            }
+            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+        }
+         /// <summary>
+         /// send player spawn -- Test D -- other for loop in first, which first write loop amount client reads
+         /// </summary>
+        private void test_sendD()
+        {
+            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
+            sendPlayerPosition.Write((byte)10);
+            for (int A = 0; A < player_list.Length; A++)
+            {
+                if (player_list[A] == null)
+                {
+                    sendPlayerPosition.Write((byte)A); // Ammount of times to loop (for amount of players, you know?
+                    for (int i = 0; i < A; i++)
+                    {
+                        if (player_list[i] != null)
+                        {
+                            //For Loop Start // this byte may be a list of all players. I'm not sure though!
+                            sendPlayerPosition.Write((short)i);                             //num4 / myAssignedPlayerID? [SHORT]
+                            sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
+                            for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
+                            {
+                                sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
+                            }
+                            sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
+                            sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
+
+                            //Really Confusing Loop
+                            sendPlayerPosition.Write(player_list[i].gunSkinCount);
+                            for (byte l = 0; l < player_list[i].gunSkinCount; l++)
+                            {
+                                sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
+                                sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
+                            }
+
+                            //Positioni?
+                            sendPlayerPosition.Write(player_list[i].position_X);
+                            sendPlayerPosition.Write(player_list[i].position_Y);
+
+                            //sendPlayerPosition.Write((float)508.7); //x2
+                            //sendPlayerPosition.Write((float)496.7); //y2
+                            sendPlayerPosition.Write(player_list[i].myName); //playername
+
+                            sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
+                            sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
+                            sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
+                            sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
+                            sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
+                            sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
+                                                                                    //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
+                            /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
+                             */
+                            sendPlayerPosition.Write(player_list[i].isDev); //isDev
+                            sendPlayerPosition.Write(player_list[i].isMod); //isMod
+                            sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
+                            sendPlayerPosition.Write((short)450); //accLvl -- short
+                            sendPlayerPosition.Write((byte)0); // amount of teammates (?)
+                                                               //sendPlayerPosition.Write((short)25); //teammate ID
+
+                        }
+                        else { break; }// break out of loop
+                    }
+                    break;
+                }
+            }
+            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+        }
+
+        #endregion
 
         #region player list methods
         /// <summary>

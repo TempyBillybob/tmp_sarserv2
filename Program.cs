@@ -8,7 +8,6 @@ namespace WC.SARS
         {
             Logger.Basic("<< Super Animal Royale Server  >>");
             Logger.Header("Super Animal Royale Version: 0.90.2\n");
-
             if (args.Length > 0)
             {
                 Match m = new Match(int.Parse(args[1]), args[0], false, false);
