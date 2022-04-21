@@ -6,6 +6,8 @@ namespace WC.SARS
     {
         static void Main(string[] args)
         {
+            Weapon.GetAllWeaponsList(); // TODO -- Make it so there's this doesn't have to be called here. There's no reason it should be like this.
+
             Logger.Basic("<< Super Animal Royale Server  >>");
             Logger.Header("Super Animal Royale Version: 0.90.2\n");
             if (args.Length > 0)

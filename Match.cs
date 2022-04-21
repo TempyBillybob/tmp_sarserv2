@@ -16,6 +16,11 @@ namespace WC.SARS
         public Player[] player_list;
         private List<short> availableIDs;
         private Thread updateThread;
+
+        private Dictionary<int, LootItem> ItemList;
+        //private Dictionary<int, VAL> CoconutList;
+        //private Dictionary<int, Vehicle>;
+
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
         private int slpTime, prevTime, prevTimeA, matchTime;
         private bool matchStarted, matchFull;
@@ -43,7 +48,6 @@ namespace WC.SARS
             gasAdvanceTimer = -1;
             prevTime = DateTime.Now.Second;
             updateThread = new Thread(serverUpdateThread);
-
             DEBUG_ENABLED = db;
             ANOYING_DEBUG1 = annoying;
             config = new NetPeerConfiguration("BR2D");
@@ -143,7 +147,7 @@ namespace WC.SARS
                                 }
                                 catch
                                 {
-                                    Logger.Failure("no float to read?");
+                                    Logger.Failure("ConnectionLatencyUpdated -- Error:: No float to read");
                                 }
                             break;
                         default:
@@ -159,8 +163,9 @@ namespace WC.SARS
         #region server update thread
         private void serverUpdateThread() //where most things get updated...
         {
-            Logger.Success("Server update thread started.");
 
+            Logger.Success("Server update thread started.");
+            generateItemLoot(351301); //should be the matchSeed1 or something
             if (!doWinCheck)
             {
                 Logger.Warn("\nWARNING -- doWinCheck is set to FALSE. The server will NOT check for a winner without intervention.");
@@ -617,9 +622,57 @@ namespace WC.SARS
                 case 18:
                     serverSendPlayerShoteded(msg);
                     break;
-                case 21:
+                case 21: //TODO -- cleanup
                     Player currPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     short item = (short)msg.ReadInt32();
+                    //for testing -- remove when done
+                    try{
+                        LootItem FoundLoot = ItemList[item];
+                        Logger.Header($"Client LootID = {item}.\nLooked up loot: {FoundLoot.LootID}");
+                        Logger.Basic($" -> Loot Item Loot Type: {FoundLoot.LootType}\n");
+                        switch (FoundLoot.LootType)
+                        {
+                            case LootType.Weapon:
+                                Logger.Header($"Found a weapon loot item.\nName:{FoundLoot.LootName}");
+                                Logger.Basic($" -> TrueType: {FoundLoot.LootType}");
+                                Logger.Basic($" -> WeaponType: {FoundLoot.WeaponType}");
+                                Logger.Basic($" -> Weapon Rarity: {FoundLoot.ItemRarity}");
+                                Logger.Basic($" -> Loot Give Amount: {FoundLoot.GiveAmount}");
+                                break;
+                            case LootType.Juices:
+                                Logger.Header($"Found a Juice Loot Item\nName:{FoundLoot.LootName}");
+                                Logger.Basic($" -> TrueType: {FoundLoot.LootType}");
+                                Logger.Basic($" -> WeaponType: {FoundLoot.WeaponType}");
+                                Logger.Basic($" -> Loot Give Amount: {FoundLoot.GiveAmount}");
+                                break;
+                            case LootType.Armor:
+                                Logger.Header($"Found a Juice Loot Item\nName:{FoundLoot.LootName}");
+                                Logger.Basic($" -> TrueType: {FoundLoot.LootType}");
+                                Logger.Basic($" -> WeaponType: {FoundLoot.WeaponType}");
+                                Logger.Basic($" -> Armor Tier: {FoundLoot.ItemRarity}");
+                                Logger.Basic($" -> Loot Give Amount: {FoundLoot.GiveAmount}");
+                                break;
+                            case LootType.Tape:
+                                Logger.Header($"Found a Tape Loot Item\nName:{FoundLoot.LootName}");
+                                Logger.Basic($" -> TrueType: {FoundLoot.LootType}");
+                                Logger.Basic($" -> WeaponType: {FoundLoot.WeaponType}");
+                                Logger.Basic($" -> Loot Give Amount: {FoundLoot.GiveAmount}");
+                                break;
+                            case LootType.Ammo:
+                                Logger.Header($"Found an Ammo Loot Item\nName:{FoundLoot.LootName}");
+                                Logger.Basic($" -> TrueType: {FoundLoot.LootType}");
+                                Logger.Basic($" -> WeaponType: {FoundLoot.WeaponType}");
+                                Logger.Basic($" -> AmmoType: {FoundLoot.ItemRarity}");
+                                Logger.Basic($" -> Base-Ammo Give Amount: {FoundLoot.GiveAmount}");
+                                break;
+                        }
+                    }
+                    catch (Exception ThisException)
+                    {
+                        Logger.Failure("ClientSentLootItem -- Error while trying to lookup server's version of client's claimed loot.");
+                        Logger.Failure($"Exception:: {ThisException}\n");
+                    }
+
                     byte index = msg.ReadByte();
                     if (DEBUG_ENABLED) { Logger.Basic($"Loot ID: {item}\nSlotIndex: {index}"); }
                     switch (index)
@@ -2181,6 +2234,182 @@ namespace WC.SARS
             }
         }
 
+        private void generateItemLoot(int seed)
+        {
+            Logger.Warn("Attempting to Generate ItemList");
+            MersenneTwister MerTwist = new MersenneTwister((uint)seed);
+            ItemList = new Dictionary<int, LootItem>();
+            int LootID = 0;
+            int LootID_temp = 0;
+            bool YesMakeBetter;
+            uint MinGenValue;
+            uint num;
+            Weapon[] MyWeaponsList = Weapon.AllWeaponsInGame;
+            List<short> WeaponsToChooseByIndex = new List<short>();
+            //Logger.DebugServer($"This Weapon List Length: {MyWeaponsList.Length}"); -- can remove
+
+            //for each weapon in the game/dataset, add each into a frequency list of all weapons by its-Frequency-amount-of-times
+            // does that make sense?
+            for (int i = 0; i < MyWeaponsList.Length; i++)
+            {
+                for (int j=0; j < MyWeaponsList[i].SpawnFrequency; j++)
+                {
+                    //Logger.Basic($"My Frequency:Index -- {MyWeaponsList[i].SpawnFrequency}:{MyWeaponsList[i].JSONIndex}"); --remove but looks cool
+                    WeaponsToChooseByIndex.Add(MyWeaponsList[i].JSONIndex);
+                }
+            }
+
+
+            // Generate Loot \\
+            //i < ( [Ammount of Regular Loot Spawns] + [Amount of Special Loot Spawns] + [Amount of 'no-bot' Loot Spawns]
+            // found stuff: Regular: 1447; Better Odds: 390; Bot Spawn: 0
+            for (int i = 0; i < 1837; i++)
+            {
+                //LootID++; -- > moved to bottom. believe it is meant to increase after everything is all done.
+                LootID = LootID_temp;
+                LootID_temp++;
+                MinGenValue = 0U;
+                YesMakeBetter = false;
+                //if (i >= 1447) YesMakeBetter = true;
+                //if (YesMakeBetter) MinGenValue = 20U;
+                if (i >= 1447)
+                {
+                    YesMakeBetter = true;
+                    MinGenValue = 20U;
+                }
+                num = MerTwist.NextUInt(MinGenValue, 100U);
+                //Logger.DebugServer($"This generated number: {num}");
+                if (num > 33.0)
+                {
+                    //Logger.Basic(" -> Greater than 33.0");
+                    
+                    if (num <= 47.0) // Create Health Juice LootItem
+                    {
+                        //Logger.Basic(" --> Less than or equal to 47.0 | Juices");
+                        byte JuiceAmount = 40;
+                        // We get here in 1 loop. MinGenValue is always set each time we check for a new num. YesMakeBetter is also set
+                        // up there as well. So, if we want to make another 0-100 & [NewMinimum]-100; MinGenValue is already 0, and 
+                        // YesMakeBetter will already be set to true/false so we can check that and set our minimum if we need to
+                        if (YesMakeBetter) MinGenValue = 15U;
+                        num = MerTwist.NextUInt(MinGenValue, 100U);
+
+                        if (num <= 55.0)
+                        {
+                            JuiceAmount = 10;
+                        }
+                        else if (num <= 89.0)
+                        {
+                            JuiceAmount = 20;
+                        }
+                        ItemList.Add(LootID, new LootItem(LootID, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{JuiceAmount}", 0, JuiceAmount));
+                    }
+                    else if (num <= 59.0) // LootType.Armor
+                    {
+                        // Logger.Basic(" --> Less than or equal to 59.0 | Armor");
+                        if (YesMakeBetter) MinGenValue = 24U;
+                        num = MerTwist.NextUInt(MinGenValue, 100U);
+                        //Logger.Basic($" - -- > Armor Generate | Min: {MinGenValue}");
+                        byte GenTier = 3;
+                        if (num <= 65.0)
+                        {
+                            GenTier = 1;
+                        }
+                        else if (num <= 92)
+                        {
+                            GenTier = 2;
+                        }
+                        /*old check worser math. either gets a tier 2 or 3.
+                        if (65.0 < num && num <= 92.0)
+                        {
+                            GenTier = 2;
+                        }
+                        else if (num < 92.0)
+                        {
+                            GenTier = 3;
+                        } //else --> GenTier = 1 */
+                        ItemList.Add(LootID, new LootItem(LootID, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{GenTier}", GenTier, 1));
+                    }
+                    else
+                    {
+                        if (num <= 60.0) // Skip :) [???]
+                        {
+                        }
+                        else if (num <= 66.0) // Tape
+                        {
+                            ItemList.Add(LootID, new LootItem(LootID, LootType.Tape, WeaponType.NotWeapon, "Tape", 0, 0));
+                        }
+                        else // Weapon Generation
+                        {
+                            // WARNING | These gun creations have the potential to make the RNG go out of sync due to the more random nature of this item type generation
+                            // If anything goes wrong with RNG... well it might be this but it also might not. But most changes to WeaponData WILL have an effect here
+                            
+                            short thisInd = WeaponsToChooseByIndex[(int)MerTwist.NextUInt(0U, (uint)WeaponsToChooseByIndex.Count)];
+                            Weapon GeneratedWeapon = Weapon.AllWeaponsInGame[(int)thisInd];
+                            //num = MerTwist.NextUInt(0U, (uint)Weapon.AllWeaponsInGame.Length);
+                            //num = MerTwist.NextUInt(0U, 101U);
+
+                            //Logger.Basic($"   -> Initial Weapon Chosen: {num}");
+
+                            WeaponType WeaponType_ = GeneratedWeapon.WeaponType;
+                            //for now, I just made it advance a frame
+
+                            //num = allWeaponsList[ (int)( MerTwist(0U, (uint)( allWeaponsList.Count ) ) ) ];
+
+                            /* This is very annoying.
+                             * Game loads a list of every single weapon in the game. Literally everything.
+                             * Stores that in a list somewhere. Uses that to generate weapos.
+                             * num = some randomly chosen weapon
+                             * WeaponType = what the actual WeaponType for that weapon is
+                             * if the weapon is a melee one, we skip
+                             * if it is a gun go do gun stuff
+                             * if it is a throwable you just spawn it depending on how many should spawn in the overworld
+                             *  (if memory serves correctly; bananas you are able to 2 of. everything other throwable spawns in 1s)
+                             */
+
+
+                            if (GeneratedWeapon.WeaponType == WeaponType.Gun)
+                            {
+                                byte ItemRarity = 0;
+                                //byte ClipSize = 0;
+                                if (YesMakeBetter) MinGenValue = 22U;
+                                num = MerTwist.NextUInt(MinGenValue, 100U);
+
+                                if (58.0 < num && num <= 80.0)
+                                {
+                                    ItemRarity = 1;
+                                }
+                                else if (80.0 < num && num <= 91.0)
+                                {
+                                    ItemRarity = 2;
+                                }
+                                else if (91.0 < num && num <= 97.0)
+                                {
+                                    ItemRarity = 3;
+                                }
+                                if (ItemRarity > GeneratedWeapon.RarityMaxVal) ItemRarity = GeneratedWeapon.RarityMaxVal;
+                                if (ItemRarity < GeneratedWeapon.RarityMinVal) ItemRarity = GeneratedWeapon.RarityMinVal;
+
+                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Gun, GeneratedWeapon.Name, ItemRarity, 1));
+                                
+                                // Spawn Ammo
+                                for (int a = 0; a < 2; a++)
+                                {
+                                    //TODO - try and find a better way of keeping track of LootID. It has to start from 0 and stuff but... come on :/
+                                    LootID = LootID_temp;
+                                    LootID_temp++;
+                                    //LootID++;
+                                    ItemList.Add(LootID, new LootItem(LootID, LootType.Ammo, WeaponType.NotWeapon, $"Ammo-Type{GeneratedWeapon.AmmoType}", GeneratedWeapon.AmmoType, GeneratedWeapon.AmmoSpawnAmount));
+                                }
+                            } else if (GeneratedWeapon.WeaponType == WeaponType.Throwable)
+                            {
+                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Throwable, GeneratedWeapon.Name, 0, GeneratedWeapon.SpawnSizeOverworld));
+                            }
+                        }
+                    }
+                }
+            }
+            Logger.Success($"Successfully generated the ItemList.Count:LootIDCount {ItemList.Keys.Count}:{LootID+1}");
+        }
 
 
         //TOOD: find out if can make test for if searched ID/whatever exists, and THEN output?
