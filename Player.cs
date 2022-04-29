@@ -1,17 +1,14 @@
 ﻿using Lidgren.Network;
-/*
-so the idea of this class is to be a client object that a server object can store in a list.
-*/
 
 namespace WC.SARS
 {
     class Player
     {
         // Make Some Empty Variables! \\
-        public short myID; // Server Assigns this
-        public NetConnection sender; // Server Also Assigns this
+        public NetConnection sender;
+        public short myID;
         public string myName = "愛子";
-        public short charID; // Character & Avatar
+        public short charID; // Character / Avatar
         public short umbrellaID; // Umbrella
         public short gravestoneID; // Gravestone
         public short deathEffectID; // Death Explosion
@@ -30,37 +27,43 @@ namespace WC.SARS
         public float mouseAngle = 0f;
         public float position_X = 508.7f; 
         public float position_Y = 496.7f;
+
+        // Dance Stuff
         public short currenteEmote = -1;
-        public byte currWalkMode = 0;
-        public byte activeSlot = 0;
-        public short equip1 = -1;
-        public short equip2 = -1;
-        public short equip3 = -1;
-        public byte equip1_rarity = 0;
-        public byte equip2_rarity = 0;
+        public float EmoteDuration;
+        public bool isDancing = false;
+
+
+        public byte WalkMode = 0;
+        public byte ActiveSlot = 0;
+        public LootItem[] MyLootItems = new LootItem[3];
+        //public LootItem EquipSlot1;
+        //public LootItem EquipSlot2;
+        //public LootItem EquipSlot3;
+        //public short equip1 = -1;
+        //public short equip2 = -1;
+        //public short equip3 = -1;
+        //public byte equip1_rarity = 0;
+        //public byte equip2_rarity = 0;
         public byte curEquipIndex = 0;
         public short vehicleID = -1;
         // having to do with "health" stuff
         public byte hp = 100; //max 100
-        public byte armorTier = 0; //do they have a level 1, 2, or 3?
-        public byte armorTapes = 0; //how many slots of that armor is *actually* taped up? (tier 2; 1/2 armorTapes > saved from shotty)
-        public byte drinkies = 200; //game wants byte, I give byte, just like with hp. however, hp is turned into a float... so why not make it one?
-        public byte tapies = 0; //amount of duct tape the player currently has. drinkies and tapies was named by me. I got bored.
-        public bool isHealing = false;
-        public bool isTaping = false;
-        public bool isAlive = true;
+        public byte armorTier = 0;
+        public byte armorTapes = 0;
+        public byte drinkies = 200;
+        public byte tapies = 0;
 
-        //simple solution to checking whether a person deserves the colors they get
-        public ulong steamID = 0;
+        // Color Bools
         public bool isDev = false;
         public bool isMod = false;
         public bool isFounder = false;
 
         //Booleans
-        public bool dancing = false;
-        public bool drinking = false;
-        public bool reloading = false;
-        public bool alive = true;
+        public bool isReloading = false;
+        public bool isDrinking = false;
+        public bool isTaping = false;
+        public bool isAlive = true;
 
         //constructor edited: 2/24/22
         public Player(short assignedID, short characterID, short parasollID, short gravestoneID, short deathExplosionID, short[] emotes, short hatID, short glassesID, short beardID, short clothingID, short meleeID, byte skinCount, short[] skinKeys, byte[] skinValues, string thisName, NetConnection senderAddress)
@@ -81,6 +84,11 @@ namespace WC.SARS
             this.gunskinKey = skinKeys;
             this.gunskinValue= skinValues;
             this.sender = senderAddress;
+            MyLootItems = new LootItem[] {
+                new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0),
+                new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0),
+                new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0)
+            };
         }
 
         /* Death Notes:
