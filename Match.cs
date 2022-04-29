@@ -1,10 +1,9 @@
 ﻿using System;
+using System.IO;
 using System.Threading;
 using System.Collections.Generic;
 using Lidgren.Network;
-
-using System.Diagnostics;
-
+using SimpleJSON;
 
 namespace WC.SARS
 {
@@ -14,13 +13,17 @@ namespace WC.SARS
         private NetPeerConfiguration config;
         public NetServer server;
         public Player[] player_list;
+        private Weapon[] s_WeaponsList = Weapon.GetAllWeaponsList();
         private List<short> availableIDs;
         private Thread updateThread;
 
+        private Dictionary<NetConnection, string> IncomingConnectionsList;
         private Dictionary<int, LootItem> ItemList;
         //private Dictionary<int, VAL> CoconutList;
         //private Dictionary<int, Vehicle>;
 
+        private JSONArray s_PlayerDataJSON;
+        private int s_TotalLootCounter;
         private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
         private int slpTime, prevTime, prevTimeA, matchTime;
         private bool matchStarted, matchFull;
@@ -35,6 +38,7 @@ namespace WC.SARS
 
         public Match(int port, string ip, bool db, bool annoying)
         {
+            s_TotalLootCounter = 0;
             slpTime = 10;
             matchStarted = false;
             matchFull = false;
@@ -42,6 +46,7 @@ namespace WC.SARS
             isSorted = true;
             player_list = new Player[64];
             availableIDs = new List<short>(64);
+            IncomingConnectionsList = new Dictionary<NetConnection, string>();
             for (short i = 0; i < 64; i++) { availableIDs.Add(i); }
 
             timeUntilStart = 90.00;
@@ -50,6 +55,19 @@ namespace WC.SARS
             updateThread = new Thread(serverUpdateThread);
             DEBUG_ENABLED = db;
             ANOYING_DEBUG1 = annoying;
+
+            // Initializing JSON stuff
+            if (File.Exists(Directory.GetCurrentDirectory() + @"\playerdata.json"))
+            {
+                JSONNode PlayerDataJSON = JSON.Parse(File.ReadAllText(Directory.GetCurrentDirectory() + @"\playerdata.json"));
+                s_PlayerDataJSON = (JSONArray)PlayerDataJSON["PlayerData"];
+            }
+            else
+            {
+                Logger.Failure("No such file 'playerdata.json'");
+                Environment.Exit(2);
+            }
+            // NetServer Initialization and starting
             config = new NetPeerConfiguration("BR2D");
             config.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
             config.PingInterval = 22f;
@@ -109,11 +127,13 @@ namespace WC.SARS
                             string clientKey = msg.ReadString();
                             if (clientKey == "flwoi51nawudkowmqqq")
                             {
-                                if (!matchStarted){
+                                if (!matchStarted)
+                                {
                                     Logger.Success("Connection Allowed.");
                                     msg.SenderConnection.Approve();
                                 }
-                                else{
+                                else
+                                {
                                     Logger.Failure("Connection Refused. Match in progress.");
                                     msg.SenderConnection.Deny($"The match has already begun, sorry!");
                                 }
@@ -163,9 +183,8 @@ namespace WC.SARS
         #region server update thread
         private void serverUpdateThread() //where most things get updated...
         {
-
             Logger.Success("Server update thread started.");
-            generateItemLoot(351301); //should be the matchSeed1 or something
+            GenerateItemLootList(351301); //should be the matchSeed1 or something
             if (!doWinCheck)
             {
                 Logger.Warn("\nWARNING -- doWinCheck is set to FALSE. The server will NOT check for a winner without intervention.");
@@ -282,7 +301,7 @@ namespace WC.SARS
                             msg.Write(player_list[i].hp);
                             msg.Write(player_list[i].armorTier);
                             msg.Write(player_list[i].armorTapes);
-                            msg.Write(player_list[i].currWalkMode);
+                            msg.Write(player_list[i].WalkMode);
                             msg.Write(player_list[i].drinkies);
                             msg.Write(player_list[i].tapies);
                         }
@@ -327,7 +346,7 @@ namespace WC.SARS
             {
                 if (player_list[i] != null)
                 {
-                    if (player_list[i].isHealing)
+                    if (player_list[i].isDrinking)
                     {
                         if (player_list[i].hp != 100)
                         {
@@ -344,7 +363,7 @@ namespace WC.SARS
                                 }
                                 else
                                 {
-                                    player_list[i].isHealing = false;
+                                    player_list[i].isDrinking = false;
                                     NetOutgoingMessage tmp_drinkFinish = server.CreateMessage();
                                     tmp_drinkFinish.Write((byte)49);
                                     tmp_drinkFinish.Write(player_list[i].myID);
@@ -355,7 +374,7 @@ namespace WC.SARS
                         }
                         else
                         {
-                            player_list[i].isHealing = false;
+                            player_list[i].isDrinking = false;
                             NetOutgoingMessage tmp_drinkFinish = server.CreateMessage();
                             tmp_drinkFinish.Write((byte)49);
                             tmp_drinkFinish.Write(player_list[i].myID);
@@ -523,7 +542,7 @@ namespace WC.SARS
                 // Request Authentication
                 case 1:
                     Logger.Header($"Authentication Requestion\nSender: {msg.SenderEndPoint}\n");
-                    sendAuthenticationResponseToClient(msg.SenderConnection);
+                    sendAuthenticationResponseToClient(msg);
                     break;
 
                 case 3: // still has work to be done
@@ -563,7 +582,7 @@ namespace WC.SARS
                                 player_list[i].position_X = actX;
                                 player_list[i].position_Y = actY;
                                 player_list[i].mouseAngle = mAngle;
-                                player_list[i].currWalkMode = currentwalkMode;
+                                player_list[i].WalkMode = currentwalkMode;
                                 break;
                             }
                         }
@@ -623,10 +642,178 @@ namespace WC.SARS
                     serverSendPlayerShoteded(msg);
                     break;
                 case 21: //TODO -- cleanup
-                    Player currPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
-                    short item = (short)msg.ReadInt32();
+                    Logger.Header("Player Looted Item");
+                    try
+                    {
+                        Player m_CurrentPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
+                        NetOutgoingMessage __ExtraLoot = null; // Extra loot message to send after telling everyone about loot and junk
+                        short m_LootID = (short)msg.ReadInt32();
+                        byte m_PlayerSlot = msg.ReadByte();
+                        LootItem m_LootToGive = ItemList[m_LootID];
+
+                        switch (m_LootToGive.LootType)
+                        {
+                            case LootType.Weapon: // Stupidity
+                                Logger.Basic($" -> Player found a weapon.\n{m_LootToGive.LootName}");
+                                if (m_PlayerSlot == 1 || m_PlayerSlot == 0) // Weapon 1 or 2 | Not Melee
+                                {
+                                    m_CurrentPlayer.MyLootItems[m_PlayerSlot] = m_LootToGive;
+                                    Logger.Failure("  -> WARNING NOT YET FULLY HANDLED");
+                                    break;
+                                }
+                                if (m_PlayerSlot != 3) // This is the throwable slot. Slot_2 is melee. 
+                                {
+                                    Logger.Failure("  -> Player has found a weapon. However, none of the slot it claims to be accessing are valid here.");
+                                    break;
+                                }
+
+                                // Throwable / Slot_3 | PlayerSlot 4 | so... m_PlayerSlot-1 = 2 >> right array index
+                                if (m_CurrentPlayer.MyLootItems[2].WeaponType != WeaponType.NotWeapon) // Player has throwable here already
+                                {
+                                    // uuuh how do we figure this out ?????
+                                    Logger.DebugServer($"Throwable LootName Test: Plr: {m_CurrentPlayer.MyLootItems[2].LootName}\nThis new loot: {m_LootToGive.LootName}");
+                                    if (m_CurrentPlayer.MyLootItems[2].LootName == m_LootToGive.LootName) // Has this throwable-type already
+                                    {
+                                        m_CurrentPlayer.MyLootItems[2].GunAmmo += m_LootToGive.GunAmmo;
+                                        Logger.Basic($"{m_CurrentPlayer.MyLootItems[2].LootName} - Amount: {m_CurrentPlayer.MyLootItems[2].GunAmmo}");
+                                        break;
+                                    }
+                                    // Else = Player has a throwable, BUT it is a different type so we need to re-spawn the old one
+                                    s_TotalLootCounter++;
+                                    NetOutgoingMessage newLoot = server.CreateMessage();
+                                    newLoot.Write((byte)20);
+                                    newLoot.Write(s_TotalLootCounter);
+                                    newLoot.Write((byte)LootType.Weapon);
+                                    Logger.Warn(m_CurrentPlayer.MyLootItems[2].IndexInList.ToString());
+                                    Logger.Warn(s_WeaponsList[m_CurrentPlayer.MyLootItems[2].IndexInList].JSONIndex.ToString());
+                                    Logger.Warn(m_CurrentPlayer.MyLootItems[2].GunAmmo.ToString());
+                                    newLoot.Write((short)m_CurrentPlayer.MyLootItems[2].IndexInList);
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write(m_CurrentPlayer.MyLootItems[2].GunAmmo);
+                                    newLoot.Write(m_CurrentPlayer.MyLootItems[2].GunAmmo.ToString());
+                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
+                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Weapon, WeaponType.Throwable, m_CurrentPlayer.MyLootItems[2].LootName, 0, (byte)m_CurrentPlayer.MyLootItems[2].IndexInList, m_CurrentPlayer.MyLootItems[2].GunAmmo));
+
+                                    //clip ammount = ammount to spawn
+
+                                    m_CurrentPlayer.MyLootItems[2] = m_LootToGive;
+                                    break;
+                                }
+                                // Player doesn't have a throwable
+                                m_CurrentPlayer.MyLootItems[2] = m_LootToGive;
+                                    // throwables = slot 3
+                                   /* switch (m_PlayerSlot)
+                                {
+                                    case 0:
+                                        Logger.Warn(" -> Recieved slot = 0");
+                                        break;
+                                    case 1:
+                                        Logger.Warn(" -> Recieved slot = 1");
+                                        break;
+                                    case 2:
+                                        Logger.Warn(" -> Recieved slot = 2");
+                                        break;
+                                    default:
+                                        Logger.Warn($" -> Yeah unhandled slot. {m_PlayerSlot}");
+                                        break;
+                                }*/
+                                break;
+                            case LootType.Juices:
+                                Logger.Basic($" -> Player found some drinkies. +{m_LootToGive.GiveAmount}");
+
+                                //Logger.DebugServer($"difference: {(int)m_CurrentPlayer.drinkies + m_LootToGive.GiveAmount}");
+                                // TODO -- Find out if this number can overroll. because they're bytes and junk and like... they get turned into ints but like... can they roll over before being added?
+                                if (m_CurrentPlayer.drinkies + m_LootToGive.GiveAmount > 200)
+                                {
+                                    m_LootToGive.GiveAmount -= (byte)(200 - m_CurrentPlayer.drinkies);
+                                    m_CurrentPlayer.drinkies += (byte)(200 - m_CurrentPlayer.drinkies);
+                                    __ExtraLoot = MakeNewDrinkLootItem(m_LootToGive.GiveAmount, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    /*NetOutgoingMessage newLoot = server.CreateMessage();
+                                    s_TotalLootCounter++;
+                                    newLoot.Write((byte)20);
+                                    newLoot.Write(s_TotalLootCounter);
+                                    newLoot.Write((byte)LootType.Juices);
+                                    newLoot.Write((short)m_LootToGive.GiveAmount);
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write((byte)0);
+                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
+                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{m_LootToGive.GiveAmount}", 0, m_LootToGive.GiveAmount));
+                                    //Logger.DebugServer($"New Give: {m_LootToGive.GiveAmount}\nDrinkies: {m_CurrentPlayer.drinkies}");
+                                    */
+                                    break;
+                                }
+                                m_CurrentPlayer.drinkies += m_LootToGive.GiveAmount;
+                                break;
+                            case LootType.Tape:
+                                Logger.Basic(" -> Player found some tape.");
+                                if (m_CurrentPlayer.tapies < 5)
+                                {
+                                    m_CurrentPlayer.tapies += m_LootToGive.GiveAmount; // Yes, generated tapes give one, but what about looted tapes?
+                                }
+                                break;
+                            case LootType.Armor:
+                                Logger.Basic($" -> Player got some armor. Tier{m_LootToGive.ItemRarity}:{m_LootToGive.GiveAmount}");
+                                if (m_CurrentPlayer.armorTier != 0)
+                                {
+                                    Logger.DebugServer(" -> Already have armor- spawn old one and give new");
+                                    //go spawn the old one
+                                    NetOutgoingMessage newLoot = server.CreateMessage();
+                                    s_TotalLootCounter++;
+                                    newLoot.Write((byte)20);
+                                    newLoot.Write(s_TotalLootCounter);
+                                    newLoot.Write((byte)LootType.Armor);
+                                    newLoot.Write((short)m_CurrentPlayer.armorTapes); // Armor's Tape Amount
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write(m_CurrentPlayer.position_X);
+                                    newLoot.Write(m_CurrentPlayer.position_Y);
+                                    newLoot.Write(m_CurrentPlayer.armorTier); // The actual tier of armor the game will display and stuff
+                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
+                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{m_CurrentPlayer.armorTier}", m_CurrentPlayer.armorTier, m_CurrentPlayer.armorTapes));
+                                    
+                                    m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
+                                    m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
+                                    break;
+                                }
+                                Logger.DebugServer(" -> Player does not already have armor. Giving them armor");
+                                m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
+                                m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
+                                break;
+
+                            // TODO - make server track how much ammo the player has. even though we won't use it
+                            case LootType.Ammo:
+                                Logger.Basic($" -> Ammo Loot: AmmoType:Ammount -- {m_LootToGive.ItemRarity}:{m_LootToGive.GiveAmount}");
+                                break;
+                        }
+                        NetOutgoingMessage testMessage = server.CreateMessage();
+                        testMessage.Write((byte)22); // Header / Packet ID
+                        testMessage.Write(m_CurrentPlayer.myID); // Player ID
+                        testMessage.Write((int)m_LootID); // Loot Item ID
+                        testMessage.Write(m_PlayerSlot); // Player Slot to update
+                        if (!matchStarted) // Write Forced Rarity
+                        {
+                            testMessage.Write((byte)4); // Only matters in a lobby
+                        }
+                        testMessage.Write((byte)0);
+                        server.SendToAll(testMessage, NetDeliveryMethod.ReliableSequenced);
+                        if (__ExtraLoot != null)
+                        {
+                            server.SendToAll(__ExtraLoot, NetDeliveryMethod.ReliableSequenced);
+                        }
+                    } catch (Exception Except)
+                    {
+                        Logger.Failure(Except.ToString());
+                    }
+
+
                     //for testing -- remove when done
-                    try{
+                    /*try{
                         LootItem FoundLoot = ItemList[item];
                         Logger.Header($"Client LootID = {item}.\nLooked up loot: {FoundLoot.LootID}");
                         Logger.Basic($" -> Loot Item Loot Type: {FoundLoot.LootType}\n");
@@ -671,34 +858,7 @@ namespace WC.SARS
                     {
                         Logger.Failure("ClientSentLootItem -- Error while trying to lookup server's version of client's claimed loot.");
                         Logger.Failure($"Exception:: {ThisException}\n");
-                    }
-
-                    byte index = msg.ReadByte();
-                    if (DEBUG_ENABLED) { Logger.Basic($"Loot ID: {item}\nSlotIndex: {index}"); }
-                    switch (index)
-                    {
-                        case 0:
-                            currPlayer.equip1 = item;
-                            currPlayer.equip1_rarity = 0;
-                            break;
-                        case 1:
-                            currPlayer.equip2 = item;
-                            currPlayer.equip2_rarity = 0;
-                            break;
-                        case 2:
-                            currPlayer.equip3 = item;
-                            break;
-                        default:
-                            Logger.Failure($"Well something went wrong with the index... index: {index}");
-                            break;
-                    }
-                    NetOutgoingMessage testMessage = server.CreateMessage();
-                    testMessage.Write((byte)22);
-                    testMessage.Write(currPlayer.myID); //player
-                    testMessage.Write((int)item); // the item
-                    testMessage.Write(index);
-                    testMessage.Write((byte)4); //Forced Rarity -- seems only applicable in the shooting gallery
-                    server.SendToAll(testMessage, NetDeliveryMethod.ReliableSequenced);
+                    }*/
                     break;
 
 
@@ -899,13 +1059,32 @@ namespace WC.SARS
             }
         }
         //message 1 -> send 2
-        private void sendAuthenticationResponseToClient(NetConnection client)
+        /// <summary>
+        /// Sends Authentication Response to a connected Client
+        /// </summary>
+        private void sendAuthenticationResponseToClient(NetIncomingMessage msg)
         {
+            //TODO -- Actually try approving the connection.
+            // string  --   PlayFabID
+            // bool    --   FillYayorNay
+            // string  --   Auth Ticket
+            // byte    --   Party Count
+            // string --    PartyMember[s] PlayFabID
+            string _PlayFabID = msg.ReadString();
+            /* bool _FillsChoice = msg.ReadBoolean();
+            string _AuthenticationTicket = msg.ReadString();
+            byte _PartyCount = msg.ReadByte();
+            string[] _PartyIDs; */
+            Logger.DebugServer("This user's PlayFabID: " + _PlayFabID);
+            if (!IncomingConnectionsList.ContainsKey(msg.SenderConnection))
+            {
+                IncomingConnectionsList.Add(msg.SenderConnection, _PlayFabID);
+            }
             NetOutgoingMessage acceptMsg = server.CreateMessage();
             acceptMsg.Write((byte)2);
             acceptMsg.Write(true); //todo - maaaybe actually try authenticating the player?
-            server.SendMessage(acceptMsg, client, NetDeliveryMethod.ReliableOrdered);
-            Logger.Success($"Server sent {client.RemoteEndPoint} their accept message!");
+            server.SendMessage(acceptMsg, msg.SenderConnection, NetDeliveryMethod.ReliableOrdered);
+            Logger.Success($"Server sent {msg.SenderConnection.RemoteEndPoint} their accept message!");
         }
 
         private void serverHandlePlayerConnection(NetIncomingMessage msg)
@@ -950,15 +1129,29 @@ namespace WC.SARS
                     //find if person who connected is mod, admin, or whatever!
                     try
                     {
-                        //should not be hard-codeded.
-                        switch (steamID)
+                        string _ThisPlayFabID = IncomingConnectionsList[msg.SenderConnection];
+                        JSONObject _PlayerJSONData;
+                        for (int p = 0; p < s_PlayerDataJSON.Count; p++)
                         {
-                            case 0:
-                                player_list[i].isDev = true;
-                                player_list[i].isMod = true;
-                                player_list[i].isFounder = true;
+                            if (s_PlayerDataJSON[p] != null && s_PlayerDataJSON[p]["PlayerID"] == _ThisPlayFabID)
+                            {
+                                _PlayerJSONData = (JSONObject)s_PlayerDataJSON[p];
+                                Logger.Basic(_PlayerJSONData.ToString());
+                                // not only does it check if the key exists, but also tests for bool soooo
+                                if (_PlayerJSONData["Admin"])
+                                {
+                                    player_list[i].isDev = true;
+                                }
+                                if (_PlayerJSONData["Moderator"])
+                                {
+                                    player_list[i].isMod = true;
+                                }
+                                if (_PlayerJSONData["Founder"])
+                                {
+                                    player_list[i].isFounder = true;
+                                }
                                 break;
-
+                            }
                         }
                     }
                     catch (Exception exceptlol)
@@ -1009,74 +1202,68 @@ namespace WC.SARS
         private void sendPlayerCharacters()
         {
             Logger.Header($"Beginning to send player characters to everyone once again.");
+            if (!isSorted) // make sure list is sorted still... but it probably is so... yeah
+            {
+                sortPlayersListNull();
+            }
             NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
             sendPlayerPosition.Write((byte)10);
-            for (byte i = 0; i < player_list.Length; i++)
+            for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
                 {
-                    sendPlayerPosition.Write(i); // Ammount of times to loop (for amount of players, you know?
+                    sendPlayerPosition.Write((byte)i); // Ammount of times to loop (for amount of players, you know?
                     break;
                 }
             }
-
-            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
-            for (short i = 0; i < player_list.Length; i++)
+            // Theoretically, I think it would be faster to just use the previously gotten list-length-to-null, and loop that many times then just stop
+            // as opposed to just doing it over. However, in the previous tests the results said otherwise so... okii!
+            for (int i = 0; i < player_list.Length; i++)
             {
-                if (player_list[i] != null)
+                if (player_list[i] != null) 
                 {
-                    Logger.Basic($"Sending << player_list[{i}] >>");
-                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                    sendPlayerPosition.Write(i);                             //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
-                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
+                    sendPlayerPosition.Write((short)i);                                 // MyAssignedID          |   Short
+                    sendPlayerPosition.Write(player_list[i].charID);                    // CharacterID           |   Short
+                    sendPlayerPosition.Write(player_list[i].umbrellaID);                // UmbrellaID            |   Short
+                    sendPlayerPosition.Write(player_list[i].gravestoneID);              // GravestoneID          |   Short
+                    sendPlayerPosition.Write(player_list[i].deathEffectID);             // ExplosionID           |   Short
+                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)            // EmoteIDs              |   Short[6]
                     {
-                        Logger.Warn("Loop Ammount: " + j);
-                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
+                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]);
                     }
-                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
-
-                    //Really Confusing Loop
-                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
-                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
+                    sendPlayerPosition.Write(player_list[i].hatID);                     // HatID                 |   Short
+                    sendPlayerPosition.Write(player_list[i].glassesID);                 // GlassesID             |   Short
+                    sendPlayerPosition.Write(player_list[i].beardID);                   // BeardID               |   Short
+                    sendPlayerPosition.Write(player_list[i].clothesID);                 // ClothesID             |   Short
+                    sendPlayerPosition.Write(player_list[i].meleeID);                   // MeleeID               |   Short
+                    //Gun skins
+                    sendPlayerPosition.Write(player_list[i].gunSkinCount);              // Amount of GunSkins    |   Byte
+                    for (byte l = 0; l < player_list[i].gunSkinCount; l++) 
                     {
-                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
-                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
+                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]);         // GunSkin GunID         |   Short in Short[]
+                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]);       // GunSkin SkinID        |   Byte in Byte[]
                     }
 
                     //Positioni?
-                    sendPlayerPosition.Write(player_list[i].position_X);
-                    sendPlayerPosition.Write(player_list[i].position_Y);
+                    sendPlayerPosition.Write(player_list[i].position_X);                // PositionX             |   Float
+                    sendPlayerPosition.Write(player_list[i].position_Y);                // PositionY             |   Float
+                    sendPlayerPosition.Write(player_list[i].myName);                    // PlayerName            |   String
 
-                    //sendPlayerPosition.Write((float)508.7); //x2
-                    //sendPlayerPosition.Write((float)496.7); //y2
-                    sendPlayerPosition.Write(player_list[i].myName); //playername
-
-                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
-                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
-                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
-                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
-                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
-                                                                           //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
-                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
-                     */
-                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
-                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
-                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
-                    sendPlayerPosition.Write((short)450); //accLvl -- short
-                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
-                    //sendPlayerPosition.Write((short)25); //teammate ID
+                    sendPlayerPosition.Write(player_list[i].currenteEmote);             // CurrentEmoteID        |   Short
+                    sendPlayerPosition.Write((short)player_list[i].MyLootItems[0].LootID);     // Equip 1 ID            |   Short
+                    sendPlayerPosition.Write((short)player_list[i].MyLootItems[1].LootID);     // Equip 2 ID            |   Short
+                    sendPlayerPosition.Write(player_list[i].MyLootItems[0].ItemRarity); // Equip 1 Rarity        |   Byte
+                    sendPlayerPosition.Write(player_list[i].MyLootItems[1].ItemRarity); // Equip 2 Rarity        |   Byte
+                    sendPlayerPosition.Write(player_list[i].ActiveSlot);                // Current Equip Index   |   Byte
+                    sendPlayerPosition.Write(player_list[i].isDev);                     // Is User Developer     |   Bool
+                    sendPlayerPosition.Write(player_list[i].isMod);                     // Is User Moderator     |   Bool
+                    sendPlayerPosition.Write(player_list[i].isFounder);                 // Is User Founder       |   Bool
+                    sendPlayerPosition.Write((short)450);                               // Player Level          |   Short
+                    sendPlayerPosition.Write((byte)0);                                  // Amount of Teammates   |   Byte
+                    //sendPlayerPosition.Write((short)25);                              // Teammate ID           |   Short
 
                 }
-                else { Logger.Success($"breakout! count: {i}"); break; }// break out of loop
+                else { break; }
             }
             Logger.Success("Going to be sending new player all other player positions.");
             server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
@@ -1100,6 +1287,14 @@ namespace WC.SARS
             msg.Write((byte)0);
             msg.Write((short)-1);
             server.SendToAll(msg, NetDeliveryMethod.ReliableOrdered);
+
+            // remove when done
+            // testing stuff
+
+            Player Attacker = player_list[getPlayerArrayIndex(message.SenderConnection)];
+            Logger.Warn($"Attacker LootID: {Attacker.MyLootItems[Attacker.curEquipIndex].LootID}\nAttacker Name: {Attacker.MyLootItems[Attacker.curEquipIndex].LootName}\nAttacking Weapon ID: {wepID}");
+
+            //
 
             /* there needs to be more code and junk to find out how much a person should actually be damaged for.
              * like client for the most part just sends weaponIDs / vehicleIDs, expecting the server to know which is which
@@ -1581,71 +1776,73 @@ namespace WC.SARS
                         doWinCheck = !doWinCheck;
                         responseMsg = $"server var, doWinCheck = {doWinCheck}";
                         break;
-
-                    //DEFINITELY only for testing. if this is left in. well, what are you doing with your life?
-                    case "/bringthepain":
-
-                        Logger.Header("Absolute insanity is about to occur.");
-                        int l;
-                        int iterations = 4000;
-                        int testRepeat = 20;
-                        double stopWatchAtime = 0.0;
-                        double stopWatchBtime = 0.0;
-                        double stopWatchCtime = 0.0;
-                        double stopWatchDtime = 0.0;
-                        Stopwatch stopWatch = new Stopwatch();
-
-                        for (int i = 0; i < testRepeat; i++) {
-                        //Logger.Warn("Method A");
-                        
-                        stopWatch.Reset();
-                        stopWatch.Start();
-                        for (l = 0; l < iterations; l++)
+                    case "/drink":
+                        Logger.Success("drink command");
+                        if (command.Length > 2)
                         {
-                            test_sendA();
+                            try
+                            {
+                                id = short.Parse(command[1]);
+                                amount = short.Parse(command[2]);
+                                player_list[id].drinkies = (byte)amount;
+                                responseMsg = $"done {amount}";
+                            }
+                            catch
+                            {
+                                responseMsg = "One or both arguments were not integer values. please try again.";
+                            }
                         }
-                        stopWatch.Stop();
-                        stopWatchAtime += stopWatch.Elapsed.TotalMilliseconds;
-                        //Logger.Basic($"Stopwatch time for [A]:  {stopWatch.Elapsed}");
-
-                        //Logger.Warn("Method B");
-                        stopWatch.Reset();
-                        stopWatch.Start();
-                        for (l = 0; l < iterations; l++)
-                        {
-                            test_sendB();
-                        }
-                        stopWatch.Stop();
-                        stopWatchBtime += stopWatch.Elapsed.TotalMilliseconds;
-                        //Logger.Basic($"Stopwatch time for [B]:  {stopWatch.Elapsed}");
-
-                        //Logger.Warn("Method C");
-                        stopWatch.Reset();
-                        stopWatch.Start();
-                        for (l = 0; l < iterations; l++)
-                        {
-                            test_sendC();
-                        }
-                        stopWatch.Stop();
-                        stopWatchCtime += stopWatch.Elapsed.TotalMilliseconds;
-                        //Logger.Basic($"Stopwatch time for [C]:  {stopWatch.Elapsed}");
-
-                        //Logger.Warn("Method D");
-                        stopWatch.Reset();
-                        stopWatch.Start();
-                        for (l = 0; l < iterations; l++)
-                        {
-                            test_sendD();
-                        }
-                        stopWatch.Stop();
-                        stopWatchDtime += stopWatch.Elapsed.TotalMilliseconds;
-                        //Logger.Basic($"Stopwatch time for [D]:  {stopWatch.Elapsed}");
-                        }
-
-                        Logger.Basic($"\nStopWatch A time: {stopWatchAtime/testRepeat}\nStopWatch B time: {stopWatchBtime / testRepeat}\nStopWatch C time: {stopWatchCtime / testRepeat}\nStopWatch D time: {stopWatchDtime / testRepeat}\n");
-                        responseMsg = "I... I think I did it... j-just check the console...";
+                        else { responseMsg = "Insufficient amount of arguments provided. usage: /drink {ID} {AMOUNT}"; }
                         break;
-
+                    case "/tapes":
+                        Logger.Success("tape command");
+                        if (command.Length > 2)
+                        {
+                            try
+                            {
+                                id = short.Parse(command[1]);
+                                amount = short.Parse(command[2]);
+                                player_list[id].armorTapes = (byte)amount;
+                                responseMsg = $"done {amount}";
+                            }
+                            catch
+                            {
+                                responseMsg = "One or both arguments were not integer values. please try again.";
+                            }
+                        }
+                        else { responseMsg = "Insufficient amount of arguments provided. usage: /tape {ID} {AMOUNT}"; }
+                        break;
+                    case "/pos":
+                        Logger.Success("position command");
+                        try
+                        {
+                            Player ___this = player_list[getPlayerArrayIndex(message.SenderConnection)];
+                            responseMsg = $"Your position: ({___this.position_X}, {___this.position_Y})";
+                        }
+                        catch
+                        {
+                            responseMsg = "Error processing command.";
+                        }
+                        break;
+                    case "/spawndrink":
+                        Logger.Success("spawndrink command");
+                        if (command.Length > 3)
+                        {
+                            try
+                            {
+                                amount = short.Parse(command[1]);
+                                cPosX = float.Parse(command[2]);
+                                cPosY = float.Parse(command[3]);
+                                server.SendToAll(MakeNewDrinkLootItem(amount, new float[] { cPosX, cPosY, cPosX, cPosY }), NetDeliveryMethod.ReliableSequenced);
+                                responseMsg = $"Created Drink item with {amount}Oz of Juice @ ({cPosX}, {cPosY})";
+                            }
+                            catch
+                            {
+                                responseMsg = "Error processing command.";
+                            }
+                        }
+                        else { responseMsg = "Insufficient amount of arguments provided. usage: /spawndrink {amount}, {X}, {Y}"; }
+                        break;
                     default:
                         Logger.Failure("Invalid command used.");
                         responseMsg = "Invalid command provided. Please see '/help' for a list of commands.";
@@ -1675,7 +1872,7 @@ namespace WC.SARS
         private void serverSendSlotUpdate(NetConnection snd, byte sentSlot)
         {
             Player plr = player_list[getPlayerArrayIndex(snd)];
-            plr.activeSlot = sentSlot;
+            plr.ActiveSlot = sentSlot;
 
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)28);
@@ -1696,17 +1893,28 @@ namespace WC.SARS
         //got 38 > send 39
         private void serverSendGrenadeThrowing(NetIncomingMessage message)
         {
-            NetOutgoingMessage msg = server.CreateMessage();
-            msg.Write((byte)39);
-            for (byte i = 0; i < 3; i++)
+            Player _plr = player_list[getPlayerArrayIndex(message.SenderConnection)];
+            if ((_plr.MyLootItems[2].GunAmmo - 1) >= 0)
             {
-                msg.Write(message.ReadFloat()); //x
-                msg.Write(message.ReadFloat()); //y
+                _plr.MyLootItems[2].GunAmmo -= 1;
+                NetOutgoingMessage msg = server.CreateMessage();
+                msg.Write((byte)39);
+                for (byte i = 0; i < 3; i++)
+                {
+                    msg.Write(message.ReadFloat()); //x
+                    msg.Write(message.ReadFloat()); //y
+                }
+                short grenadeID = message.ReadInt16();
+                msg.Write(grenadeID);
+                msg.Write(grenadeID);//likely needs to be unique. not sure how. maybe just make the server have its own counter
+                server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
+                if (_plr.MyLootItems[2].GunAmmo == 0)
+                {
+                    _plr.MyLootItems[2] = new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0);
+                }
+                return;
             }
-            short grenadeID = message.ReadInt16();
-            msg.Write(grenadeID);
-            msg.Write(grenadeID);//likely needs to be unique. not sure how. maybe just make the server have its own counter
-            server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
+            Logger.Failure($"[[serverSendGrenadeThrowing]] - Amount of grenades-1 = <0 | {_plr.MyLootItems[2].GiveAmount-1}");
         }
         //r40 >
         private void serverSendGrenadeFinished(NetIncomingMessage message){
@@ -1817,7 +2025,7 @@ namespace WC.SARS
             Player plr = player_list[getPlayerArrayIndex(sender)];
             plr.position_X = posX;
             plr.position_Y = posY;
-            plr.isHealing = true;
+            plr.isDrinking = true;
 
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)48);
@@ -1855,307 +2063,223 @@ namespace WC.SARS
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
         }
 
-
-        #region TEST_METHODS
         /// <summary>
-        /// send player spawn -- Test A -- literally just the original send player spawn method without print statements.
+        /// Creates a NetOutgoingMessage which tells the client about a new Drink LootItem
         /// </summary>
-        private void test_sendA()
+        private NetOutgoingMessage MakeNewDrinkLootItem(short aDrinkAmount, float[] aPositions)
         {
-            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
-            sendPlayerPosition.Write((byte)10);
-            for (byte i = 0; i < player_list.Length; i++)
-            {
-                if (player_list[i] == null)
-                {
-                    sendPlayerPosition.Write(i); // Ammount of times to loop (for amount of players, you know?
-                    break;
-                }
-            }
-            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
-            for (short i = 0; i < player_list.Length; i++)
-            {
-                if (player_list[i] != null)
-                {
-                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                    sendPlayerPosition.Write(i);                             //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
-                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
-                    {
-                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
-                    }
-                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
-
-                    //Really Confusing Loop
-                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
-                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
-                    {
-                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
-                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
-                    }
-
-                    //Positioni?
-                    sendPlayerPosition.Write(player_list[i].position_X);
-                    sendPlayerPosition.Write(player_list[i].position_Y);
-
-                    //sendPlayerPosition.Write((float)508.7); //x2
-                    //sendPlayerPosition.Write((float)496.7); //y2
-                    sendPlayerPosition.Write(player_list[i].myName); //playername
-
-                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
-                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
-                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
-                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
-                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
-                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
-                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
-                     */
-                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
-                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
-                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
-                    sendPlayerPosition.Write((short)450); //accLvl -- short
-                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
-                    //sendPlayerPosition.Write((short)25); //teammate ID
-
-                }
-                else { break; }// break out of loop
-            }
-            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+            s_TotalLootCounter++; // Increase LootCounter by 1
+            NetOutgoingMessage msg = server.CreateMessage();
+            msg.Write((byte)20);                // Header       |  Byte
+            msg.Write(s_TotalLootCounter);      // LootID       |  Int
+            msg.Write((byte)LootType.Juices);   // LootType     |  Byte
+            msg.Write(aDrinkAmount);            // Info/Amount  |  Short
+            msg.Write(aPositions[0]);           // Postion X1   |  Float
+            msg.Write(aPositions[1]);           // Postion Y1   |  Float
+            msg.Write(aPositions[2]);           // Postion X2   |  Float
+            msg.Write(aPositions[3]);           // Postion Y2   |  Float
+            msg.Write((byte)0);
+            ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{aDrinkAmount}", 0, (byte)aDrinkAmount));
+            return msg;
         }
         /// <summary>
-        /// send player spawn -- Test B -- for loops use INT i = 0 as opposite to SHORT i or BYTE i
+        /// Creates a new Armor Loot Item generation message to be sent out, and adds the new item to the loot list. This message MUST be sent.
         /// </summary>
-        private void test_sendB()
+        private NetOutgoingMessage MakeNewArmorLootItem(byte armorTicks, byte armorTier, float[] aPositions)
         {
-            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
-            sendPlayerPosition.Write((byte)10);
-            for (int i = 0; i < player_list.Length; i++)
-            {
-                if (player_list[i] == null)
-                {
-                    sendPlayerPosition.Write((byte)i); // Ammount of times to loop (for amount of players, you know?
-                    break;
-                }
-            }
-            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
-            for (int i = 0; i < player_list.Length; i++)
-            {
-                if (player_list[i] != null)
-                {
-                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                    sendPlayerPosition.Write((short)i);                             //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
-                    for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
-                    {
-                        sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
-                    }
-                    sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
-                    sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
-
-                    //Really Confusing Loop
-                    sendPlayerPosition.Write(player_list[i].gunSkinCount);
-                    for (byte l = 0; l < player_list[i].gunSkinCount; l++)
-                    {
-                        sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
-                        sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
-                    }
-
-                    //Positioni?
-                    sendPlayerPosition.Write(player_list[i].position_X);
-                    sendPlayerPosition.Write(player_list[i].position_Y);
-
-                    //sendPlayerPosition.Write((float)508.7); //x2
-                    //sendPlayerPosition.Write((float)496.7); //y2
-                    sendPlayerPosition.Write(player_list[i].myName); //playername
-
-                    sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                    sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
-                    sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
-                    sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
-                    sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
-                    sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
-                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
-                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
-                     */
-                    sendPlayerPosition.Write(player_list[i].isDev); //isDev
-                    sendPlayerPosition.Write(player_list[i].isMod); //isMod
-                    sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
-                    sendPlayerPosition.Write((short)450); //accLvl -- short
-                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
-                    //sendPlayerPosition.Write((short)25); //teammate ID
-
-                }
-                else { break; }// break out of loop
-            }
-            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+            NetOutgoingMessage msg = server.CreateMessage();
+            s_TotalLootCounter++;               // Increase LootCounter by 1
+            msg.Write((byte)20);                // Header       |  Byte
+            msg.Write(s_TotalLootCounter);      // LootID       |  Int
+            msg.Write((byte)LootType.Armor);    // LootType     |  Byte
+            msg.Write((short)armorTicks);       // Info/Amount  |  Short
+            msg.Write(aPositions[0]);           // Postion X1   |  Float
+            msg.Write(aPositions[1]);           // Postion Y1   |  Float
+            msg.Write(aPositions[2]);           // Postion X2   |  Float
+            msg.Write(aPositions[3]);           // Postion Y2   |  Float
+            msg.Write(armorTier);               // Rarity       |  Byte
+            ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{armorTier}", armorTier, armorTicks));
+            return msg;
         }
+
         /// <summary>
-        /// send player spawn -- Test C -- similar to Test B, however local variable thisPlr is used instead of player_list[i] to write data
+        /// Fills the Server's LootItem-List. Only use this once.
         /// </summary>
-        private void test_sendC()
+        private void GenerateItemLootList(int seed)
         {
-            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
-            sendPlayerPosition.Write((byte)10);
-            for (int i = 0; i < player_list.Length; i++)
+            Logger.Warn("Attempting to Generate ItemList");
+            MersenneTwister MerTwist = new MersenneTwister((uint)seed);
+            ItemList = new Dictionary<int, LootItem>();
+            int LootID = 0;
+            s_TotalLootCounter = 0;
+            bool YesMakeBetter;
+            uint MinGenValue;
+            uint num;
+            List<short> WeaponsToChooseByIndex = new List<short>();
+            //Logger.DebugServer($"This Weapon List Length: {MyWeaponsList.Length}"); -- can remove
+
+            //for each weapon in the game/dataset, add each into a frequency list of all weapons by its-Frequency-amount-of-times
+            // does that make sense?
+            for (int i = 0; i < s_WeaponsList.Length; i++)
             {
-                if (player_list[i] == null)
+                for (int j = 0; j < s_WeaponsList[i].SpawnFrequency; j++)
                 {
-                    sendPlayerPosition.Write((byte)i); // Ammount of times to loop (for amount of players, you know?
-                    break;
+                    //Logger.Basic($"My Frequency:Index -- {MyWeaponsList[i].SpawnFrequency}:{MyWeaponsList[i].JSONIndex}"); --remove but looks cool
+                    WeaponsToChooseByIndex.Add(s_WeaponsList[i].JSONIndex);
                 }
             }
-            Player thisPlr;
-            // loop through the list of all of the players in the match \\ < -- clearly can go up there ^^^
-            for (int i = 0; i < player_list.Length; i++)
+            // Generate Loot \\
+            //i < ( [Ammount of Regular Loot Spawns] + [Amount of Special Loot Spawns] + [Amount of 'no-bot' Loot Spawns]
+            // found stuff: Regular: 1447; Better Odds: 390; Bot Spawn: 0
+            for (int i = 0; i < 1837; i++)
             {
-                if (player_list[i] != null)
+                //LootID++; -- > LootID++ after completing a loop. sorta.
+                LootID = s_TotalLootCounter;
+                s_TotalLootCounter++;
+                MinGenValue = 0U;
+                YesMakeBetter = false;
+                //if (i >= 1447) YesMakeBetter = true;
+                //if (YesMakeBetter) MinGenValue = 20U;
+                if (i >= 1447)
                 {
-                    thisPlr = player_list[i];
-                    //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                    sendPlayerPosition.Write(thisPlr.myID);                             //num4 / myAssignedPlayerID? [SHORT]
-                    sendPlayerPosition.Write(thisPlr.charID);         //charIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.umbrellaID);     //umbrellaIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.gravestoneID);   //gravestoneIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.deathEffectID);  //explosionIndex [SHORT]
-                    for (int j = 0; j < thisPlr.emoteIDs.Length; j++)
-                    {
-                        sendPlayerPosition.Write(thisPlr.emoteIDs[j]); //emoteIndex [SHORT]
-                    }
-                    sendPlayerPosition.Write(thisPlr.hatID); //hatIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.glassesID); //glassesIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.beardID); //beardIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.clothesID); //clothesIndex [SHORT]
-                    sendPlayerPosition.Write(thisPlr.meleeID); //meleeIndex [SHORT]
-
-                    //Really Confusing Loop
-                    sendPlayerPosition.Write(thisPlr.gunSkinCount);
-                    for (byte l = 0; l < thisPlr.gunSkinCount; l++)
-                    {
-                        sendPlayerPosition.Write(thisPlr.gunskinKey[l]); //Unknown Key
-                        sendPlayerPosition.Write(thisPlr.gunskinValue[l]); //Unknown Value
-                    }
-
-                    //Positioni?
-                    sendPlayerPosition.Write(thisPlr.position_X);
-                    sendPlayerPosition.Write(thisPlr.position_Y);
-
-                    //sendPlayerPosition.Write((float)508.7); //x2
-                    //sendPlayerPosition.Write((float)496.7); //y2
-                    sendPlayerPosition.Write(thisPlr.myName); //playername
-
-                    sendPlayerPosition.Write(thisPlr.currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                    sendPlayerPosition.Write(thisPlr.equip1); //equip -- int16
-                    sendPlayerPosition.Write(thisPlr.equip2); //equip2 - int16
-                    sendPlayerPosition.Write(thisPlr.equip1_rarity); // equip rarty byte
-                    sendPlayerPosition.Write(thisPlr.equip2_rarity); // equip rarity 2 -- byte
-                    sendPlayerPosition.Write(thisPlr.curEquipIndex); // current equip index -- byte
-                                                                            //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
-                    /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
-                     */
-                    sendPlayerPosition.Write(thisPlr.isDev); //isDev
-                    sendPlayerPosition.Write(thisPlr.isMod); //isMod
-                    sendPlayerPosition.Write(thisPlr.isFounder); //isFounder
-                    sendPlayerPosition.Write((short)450); //accLvl -- short
-                    sendPlayerPosition.Write((byte)0); // amount of teammates (?)
-                    //sendPlayerPosition.Write((short)25); //teammate ID
-
+                    YesMakeBetter = true;
+                    MinGenValue = 20U;
                 }
-                else { break; }// break out of loop
-            }
-            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
-        }
-         /// <summary>
-         /// send player spawn -- Test D -- other for loop in first, which first write loop amount client reads
-         /// </summary>
-        private void test_sendD()
-        {
-            NetOutgoingMessage sendPlayerPosition = server.CreateMessage();
-            sendPlayerPosition.Write((byte)10);
-            for (int A = 0; A < player_list.Length; A++)
-            {
-                if (player_list[A] == null)
+                num = MerTwist.NextUInt(MinGenValue, 100U);
+                //Logger.DebugServer($"This generated number: {num}");
+                if (num > 33.0)
                 {
-                    sendPlayerPosition.Write((byte)A); // Ammount of times to loop (for amount of players, you know?
-                    for (int i = 0; i < A; i++)
+                    //Logger.Basic(" -> Greater than 33.0");
+
+                    if (num <= 47.0) // Create Health Juice LootItem
                     {
-                        if (player_list[i] != null)
+                        //Logger.Basic(" --> Less than or equal to 47.0 | Juices");
+                        byte JuiceAmount = 40;
+                        // We get here in 1 loop. MinGenValue is always set each time we check for a new num. YesMakeBetter is also set
+                        // up there as well. So, if we want to make another 0-100 & [NewMinimum]-100; MinGenValue is already 0, and 
+                        // YesMakeBetter will already be set to true/false so we can check that and set our minimum if we need to
+                        if (YesMakeBetter) MinGenValue = 15U;
+                        num = MerTwist.NextUInt(MinGenValue, 100U);
+
+                        if (num <= 55.0)
                         {
-                            //For Loop Start // this byte may be a list of all players. I'm not sure though!
-                            sendPlayerPosition.Write((short)i);                             //num4 / myAssignedPlayerID? [SHORT]
-                            sendPlayerPosition.Write(player_list[i].charID);         //charIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].umbrellaID);     //umbrellaIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].gravestoneID);   //gravestoneIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].deathEffectID);  //explosionIndex [SHORT]
-                            for (int j = 0; j < player_list[i].emoteIDs.Length; j++)
-                            {
-                                sendPlayerPosition.Write(player_list[i].emoteIDs[j]); //emoteIndex [SHORT]
-                            }
-                            sendPlayerPosition.Write(player_list[i].hatID); //hatIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].glassesID); //glassesIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].beardID); //beardIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].clothesID); //clothesIndex [SHORT]
-                            sendPlayerPosition.Write(player_list[i].meleeID); //meleeIndex [SHORT]
-
-                            //Really Confusing Loop
-                            sendPlayerPosition.Write(player_list[i].gunSkinCount);
-                            for (byte l = 0; l < player_list[i].gunSkinCount; l++)
-                            {
-                                sendPlayerPosition.Write(player_list[i].gunskinKey[l]); //Unknown Key
-                                sendPlayerPosition.Write(player_list[i].gunskinValue[l]); //Unknown Value
-                            }
-
-                            //Positioni?
-                            sendPlayerPosition.Write(player_list[i].position_X);
-                            sendPlayerPosition.Write(player_list[i].position_Y);
-
-                            //sendPlayerPosition.Write((float)508.7); //x2
-                            //sendPlayerPosition.Write((float)496.7); //y2
-                            sendPlayerPosition.Write(player_list[i].myName); //playername
-
-                            sendPlayerPosition.Write(player_list[i].currenteEmote); //num 6 - int16 -- I think this is the emote currently in use. so... defualt should be none/ -1
-                            sendPlayerPosition.Write(player_list[i].equip1); //equip -- int16
-                            sendPlayerPosition.Write(player_list[i].equip2); //equip2 - int16
-                            sendPlayerPosition.Write(player_list[i].equip1_rarity); // equip rarty byte
-                            sendPlayerPosition.Write(player_list[i].equip2_rarity); // equip rarity 2 -- byte
-                            sendPlayerPosition.Write(player_list[i].curEquipIndex); // current equip index -- byte
-                                                                                    //sendPlayerPosition.Write((short)12); //num8 -- something with emotes?
-                            /* 0 -- Default; 4-- Clap; 10 -- Russian; 11- Laugh; 
-                             */
-                            sendPlayerPosition.Write(player_list[i].isDev); //isDev
-                            sendPlayerPosition.Write(player_list[i].isMod); //isMod
-                            sendPlayerPosition.Write(player_list[i].isFounder); //isFounder
-                            sendPlayerPosition.Write((short)450); //accLvl -- short
-                            sendPlayerPosition.Write((byte)0); // amount of teammates (?)
-                                                               //sendPlayerPosition.Write((short)25); //teammate ID
-
+                            JuiceAmount = 10;
                         }
-                        else { break; }// break out of loop
+                        else if (num <= 89.0)
+                        {
+                            JuiceAmount = 20;
+                        }
+                        ItemList.Add(LootID, new LootItem(LootID, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{JuiceAmount}", 0, JuiceAmount));
                     }
-                    break;
+                    else if (num <= 59.0) // LootType.Armor
+                    {
+                        // Logger.Basic(" --> Less than or equal to 59.0 | Armor");
+                        if (YesMakeBetter) MinGenValue = 24U;
+                        num = MerTwist.NextUInt(MinGenValue, 100U);
+                        //Logger.Basic($" - -- > Armor Generate | Min: {MinGenValue}");
+                        byte GenTier = 3;
+                        if (num <= 65.0)
+                        {
+                            GenTier = 1;
+                        }
+                        else if (num <= 92)
+                        {
+                            GenTier = 2;
+                        }
+                        /*old check worser math. either gets a tier 2 or 3.
+                        if (65.0 < num && num <= 92.0)
+                        {
+                            GenTier = 2;
+                        }
+                        else if (num < 92.0)
+                        {
+                            GenTier = 3;
+                        } //else --> GenTier = 1 */
+            ItemList.Add(LootID, new LootItem(LootID, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{GenTier}", GenTier, GenTier)); // GiveAmount for armor is how many tick it has. gotta reuse stuff
+                    }
+                    else
+                    {
+                        if (num <= 60.0) // Skip :) [???]
+                        {
+                        }
+                        else if (num <= 66.0) // Tape
+                        {
+                            ItemList.Add(LootID, new LootItem(LootID, LootType.Tape, WeaponType.NotWeapon, "Tape", 0, 1));
+                        }
+                        else // Weapon Generation
+                        {
+                            // WARNING | These gun creations have the potential to make the RNG go out of sync due to the more random nature of this item type generation
+                            // If anything goes wrong with RNG... well it might be this but it also might not. But most changes to WeaponData WILL have an effect here
+
+                            short thisInd = WeaponsToChooseByIndex[(int)MerTwist.NextUInt(0U, (uint)WeaponsToChooseByIndex.Count)];
+                            Weapon GeneratedWeapon = s_WeaponsList[(int)thisInd];
+                            //num = MerTwist.NextUInt(0U, (uint)Weapon.AllWeaponsInGame.Length);
+                            //num = MerTwist.NextUInt(0U, 101U);
+
+                            //Logger.Basic($"   -> Initial Weapon Chosen: {num}");
+
+                            //WeaponType WeaponType_ = GeneratedWeapon.WeaponType;
+                            //for now, I just made it advance a frame
+
+                            //num = allWeaponsList[ (int)( MerTwist(0U, (uint)( allWeaponsList.Count ) ) ) ];
+
+                            /* This is very annoying.
+                             * Game loads a list of every single weapon in the game. Literally everything.
+                             * Stores that in a list somewhere. Uses that to generate weapos.
+                             * num = some randomly chosen weapon
+                             * WeaponType = what the actual WeaponType for that weapon is
+                             * if the weapon is a melee one, we skip
+                             * if it is a gun go do gun stuff
+                             * if it is a throwable you just spawn it depending on how many should spawn in the overworld
+                             *  (if memory serves correctly; bananas you are able to 2 of. everything other throwable spawns in 1s)
+                             */
+
+
+                            if (GeneratedWeapon.WeaponType == WeaponType.Gun)
+                            {
+                                byte ItemRarity = 0;
+                                if (YesMakeBetter) MinGenValue = 22U;
+                                num = MerTwist.NextUInt(MinGenValue, 100U);
+                                if (58.0 < num && num <= 80.0)
+                                {
+                                    ItemRarity = 1;
+                                }
+                                else if (80.0 < num && num <= 91.0)
+                                {
+                                    ItemRarity = 2;
+                                }
+                                else if (91.0 < num && num <= 97.0)
+                                {
+                                    ItemRarity = 3;
+                                }
+                                if (ItemRarity > GeneratedWeapon.RarityMaxVal) ItemRarity = GeneratedWeapon.RarityMaxVal;
+                                if (ItemRarity < GeneratedWeapon.RarityMinVal) ItemRarity = GeneratedWeapon.RarityMinVal;
+                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Gun, GeneratedWeapon.Name, ItemRarity, (byte)GeneratedWeapon.JSONIndex, GeneratedWeapon.ClipSize));
+
+                                // Spawn Ammo
+                                for (int a = 0; a < 2; a++)
+                                {
+                                    LootID = s_TotalLootCounter;
+                                    s_TotalLootCounter++;
+                                    //LootID++;
+                                    ItemList.Add(LootID, new LootItem(LootID, LootType.Ammo, WeaponType.NotWeapon, $"Ammo-Type{GeneratedWeapon.AmmoType}", GeneratedWeapon.AmmoType, GeneratedWeapon.AmmoSpawnAmount));
+                                }
+                            }
+                            else if (GeneratedWeapon.WeaponType == WeaponType.Throwable)
+                            {
+                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Throwable, GeneratedWeapon.Name, 0, (byte)GeneratedWeapon.JSONIndex, GeneratedWeapon.SpawnSizeOverworld));
+                            }
+                        }
+                    }
                 }
             }
-            //server.SendToAll(sendPlayerPosition, NetDeliveryMethod.ReliableSequenced);
+            //Logger.Success($"Successfully generated the ItemList.Count:LootIDCount {ItemList.Keys.Count}:{LootID + 1}");
+            //Logger.Success($"ItemList.Count:LootIDCount -- {ItemList.Keys.Count}:{s_TotalLootCounter}");
         }
-
-        #endregion
 
         #region player list methods
         /// <summary>
-        /// Sorts out null instances in the player list. Does not put them in sequential order.
+        /// Puts null instances in the playerlist at the bottom of the list. Does not any of them in sequential order.
         /// </summary>
         private void sortPlayersListNull()
         {
@@ -2202,224 +2326,30 @@ namespace WC.SARS
 
         private short getPlayerListLength()
         {
+            // This isn't used but the older version was so stupidly overcomplicated.
             short length;
-            if (isSorted)
+            if (!isSorted)
             {
-                Logger.Header("Already sorted playerlist! wahoo!");
-                Logger.Basic($"length of playerList array = {player_list.Length}");
-                for (length = 0; length < player_list.Length; length++)
-                {
-                    if (player_list[length] == null)
-                    {
-                        break;
-                    }
-                }
-                Logger.Basic($"returned value: {length}");
-                return length;
+                sortPlayersListNull();
             }
-            else
+            Logger.Basic($"length of playerList array = {player_list.Length}");
+            for (length = 0; length < player_list.Length; length++)
             {
-                Logger.Header("WE MUST SORT THE PLAYER LIST BEFORE FINDING LENGTH");
-                Logger.Basic($"length of playerList array = {player_list.Length}");
-                sortPlayersListNull(); //doing this may not be necessary because the main update thread should already sorted. but who knows!
-                for (length = 0; length < player_list.Length; length++)
+                if (player_list[length] == null)
                 {
-                    if (player_list[length] == null)
-                    {
-                        break;
-                    }
+                    break;
                 }
-                Logger.Basic($"returned value: {length}");
-                return length;
             }
+            Logger.Basic($"returned value: {length}");
+            return length;
         }
 
-        private void generateItemLoot(int seed)
-        {
-            Logger.Warn("Attempting to Generate ItemList");
-            MersenneTwister MerTwist = new MersenneTwister((uint)seed);
-            ItemList = new Dictionary<int, LootItem>();
-            int LootID = 0;
-            int LootID_temp = 0;
-            bool YesMakeBetter;
-            uint MinGenValue;
-            uint num;
-            Weapon[] MyWeaponsList = Weapon.AllWeaponsInGame;
-            List<short> WeaponsToChooseByIndex = new List<short>();
-            //Logger.DebugServer($"This Weapon List Length: {MyWeaponsList.Length}"); -- can remove
-
-            //for each weapon in the game/dataset, add each into a frequency list of all weapons by its-Frequency-amount-of-times
-            // does that make sense?
-            for (int i = 0; i < MyWeaponsList.Length; i++)
-            {
-                for (int j=0; j < MyWeaponsList[i].SpawnFrequency; j++)
-                {
-                    //Logger.Basic($"My Frequency:Index -- {MyWeaponsList[i].SpawnFrequency}:{MyWeaponsList[i].JSONIndex}"); --remove but looks cool
-                    WeaponsToChooseByIndex.Add(MyWeaponsList[i].JSONIndex);
-                }
-            }
-
-
-            // Generate Loot \\
-            //i < ( [Ammount of Regular Loot Spawns] + [Amount of Special Loot Spawns] + [Amount of 'no-bot' Loot Spawns]
-            // found stuff: Regular: 1447; Better Odds: 390; Bot Spawn: 0
-            for (int i = 0; i < 1837; i++)
-            {
-                //LootID++; -- > moved to bottom. believe it is meant to increase after everything is all done.
-                LootID = LootID_temp;
-                LootID_temp++;
-                MinGenValue = 0U;
-                YesMakeBetter = false;
-                //if (i >= 1447) YesMakeBetter = true;
-                //if (YesMakeBetter) MinGenValue = 20U;
-                if (i >= 1447)
-                {
-                    YesMakeBetter = true;
-                    MinGenValue = 20U;
-                }
-                num = MerTwist.NextUInt(MinGenValue, 100U);
-                //Logger.DebugServer($"This generated number: {num}");
-                if (num > 33.0)
-                {
-                    //Logger.Basic(" -> Greater than 33.0");
-                    
-                    if (num <= 47.0) // Create Health Juice LootItem
-                    {
-                        //Logger.Basic(" --> Less than or equal to 47.0 | Juices");
-                        byte JuiceAmount = 40;
-                        // We get here in 1 loop. MinGenValue is always set each time we check for a new num. YesMakeBetter is also set
-                        // up there as well. So, if we want to make another 0-100 & [NewMinimum]-100; MinGenValue is already 0, and 
-                        // YesMakeBetter will already be set to true/false so we can check that and set our minimum if we need to
-                        if (YesMakeBetter) MinGenValue = 15U;
-                        num = MerTwist.NextUInt(MinGenValue, 100U);
-
-                        if (num <= 55.0)
-                        {
-                            JuiceAmount = 10;
-                        }
-                        else if (num <= 89.0)
-                        {
-                            JuiceAmount = 20;
-                        }
-                        ItemList.Add(LootID, new LootItem(LootID, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{JuiceAmount}", 0, JuiceAmount));
-                    }
-                    else if (num <= 59.0) // LootType.Armor
-                    {
-                        // Logger.Basic(" --> Less than or equal to 59.0 | Armor");
-                        if (YesMakeBetter) MinGenValue = 24U;
-                        num = MerTwist.NextUInt(MinGenValue, 100U);
-                        //Logger.Basic($" - -- > Armor Generate | Min: {MinGenValue}");
-                        byte GenTier = 3;
-                        if (num <= 65.0)
-                        {
-                            GenTier = 1;
-                        }
-                        else if (num <= 92)
-                        {
-                            GenTier = 2;
-                        }
-                        /*old check worser math. either gets a tier 2 or 3.
-                        if (65.0 < num && num <= 92.0)
-                        {
-                            GenTier = 2;
-                        }
-                        else if (num < 92.0)
-                        {
-                            GenTier = 3;
-                        } //else --> GenTier = 1 */
-                        ItemList.Add(LootID, new LootItem(LootID, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{GenTier}", GenTier, 1));
-                    }
-                    else
-                    {
-                        if (num <= 60.0) // Skip :) [???]
-                        {
-                        }
-                        else if (num <= 66.0) // Tape
-                        {
-                            ItemList.Add(LootID, new LootItem(LootID, LootType.Tape, WeaponType.NotWeapon, "Tape", 0, 0));
-                        }
-                        else // Weapon Generation
-                        {
-                            // WARNING | These gun creations have the potential to make the RNG go out of sync due to the more random nature of this item type generation
-                            // If anything goes wrong with RNG... well it might be this but it also might not. But most changes to WeaponData WILL have an effect here
-                            
-                            short thisInd = WeaponsToChooseByIndex[(int)MerTwist.NextUInt(0U, (uint)WeaponsToChooseByIndex.Count)];
-                            Weapon GeneratedWeapon = Weapon.AllWeaponsInGame[(int)thisInd];
-                            //num = MerTwist.NextUInt(0U, (uint)Weapon.AllWeaponsInGame.Length);
-                            //num = MerTwist.NextUInt(0U, 101U);
-
-                            //Logger.Basic($"   -> Initial Weapon Chosen: {num}");
-
-                            WeaponType WeaponType_ = GeneratedWeapon.WeaponType;
-                            //for now, I just made it advance a frame
-
-                            //num = allWeaponsList[ (int)( MerTwist(0U, (uint)( allWeaponsList.Count ) ) ) ];
-
-                            /* This is very annoying.
-                             * Game loads a list of every single weapon in the game. Literally everything.
-                             * Stores that in a list somewhere. Uses that to generate weapos.
-                             * num = some randomly chosen weapon
-                             * WeaponType = what the actual WeaponType for that weapon is
-                             * if the weapon is a melee one, we skip
-                             * if it is a gun go do gun stuff
-                             * if it is a throwable you just spawn it depending on how many should spawn in the overworld
-                             *  (if memory serves correctly; bananas you are able to 2 of. everything other throwable spawns in 1s)
-                             */
-
-
-                            if (GeneratedWeapon.WeaponType == WeaponType.Gun)
-                            {
-                                byte ItemRarity = 0;
-                                //byte ClipSize = 0;
-                                if (YesMakeBetter) MinGenValue = 22U;
-                                num = MerTwist.NextUInt(MinGenValue, 100U);
-
-                                if (58.0 < num && num <= 80.0)
-                                {
-                                    ItemRarity = 1;
-                                }
-                                else if (80.0 < num && num <= 91.0)
-                                {
-                                    ItemRarity = 2;
-                                }
-                                else if (91.0 < num && num <= 97.0)
-                                {
-                                    ItemRarity = 3;
-                                }
-                                if (ItemRarity > GeneratedWeapon.RarityMaxVal) ItemRarity = GeneratedWeapon.RarityMaxVal;
-                                if (ItemRarity < GeneratedWeapon.RarityMinVal) ItemRarity = GeneratedWeapon.RarityMinVal;
-
-                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Gun, GeneratedWeapon.Name, ItemRarity, 1));
-                                
-                                // Spawn Ammo
-                                for (int a = 0; a < 2; a++)
-                                {
-                                    //TODO - try and find a better way of keeping track of LootID. It has to start from 0 and stuff but... come on :/
-                                    LootID = LootID_temp;
-                                    LootID_temp++;
-                                    //LootID++;
-                                    ItemList.Add(LootID, new LootItem(LootID, LootType.Ammo, WeaponType.NotWeapon, $"Ammo-Type{GeneratedWeapon.AmmoType}", GeneratedWeapon.AmmoType, GeneratedWeapon.AmmoSpawnAmount));
-                                }
-                            } else if (GeneratedWeapon.WeaponType == WeaponType.Throwable)
-                            {
-                                ItemList.Add(LootID, new LootItem(LootID, LootType.Weapon, WeaponType.Throwable, GeneratedWeapon.Name, 0, GeneratedWeapon.SpawnSizeOverworld));
-                            }
-                        }
-                    }
-                }
-            }
-            Logger.Success($"Successfully generated the ItemList.Count:LootIDCount {ItemList.Keys.Count}:{LootID+1}");
-        }
-
-
-        //TOOD: find out if can make test for if searched ID/whatever exists, and THEN output?
         /// <summary>
         /// Traverses the player list array in 
         /// </summary>
         /// <returns>True if ID is found in the array; False if otherwise.</returns>
         private bool tryFindPlayerIDbyName(string searchName, out short outID)
         {
-            //make sure is lower as well?
             searchName = searchName.ToLower();
             for (int i = 0; i < player_list.Length; i++)
             {
@@ -2449,7 +2379,6 @@ namespace WC.SARS
             returnedIndex = -1;
             return false;
         }
-
 
         //Helper Functions to get playerID
         /// <summary>
