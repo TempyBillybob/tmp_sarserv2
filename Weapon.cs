@@ -6,7 +6,6 @@ namespace WC.SARS
 {
     internal class Weapon
     {
-        public static Weapon[] AllWeaponsInGame;
         public WeaponType WeaponType;
         public string Name;
         public short JSONIndex;
@@ -46,7 +45,6 @@ namespace WC.SARS
                     if (data["grenadeInfo"]["worldSpawnAmount"])
                     {
                         SpawnSizeOverworld = (byte)data["grenadeInfo"]["worldSpawnAmount"].AsInt;
-                        Logger.Success($"{Name} - Spawn Size for the overworld: {SpawnSizeOverworld}");
                     }
                     else
                     {
@@ -104,7 +102,7 @@ namespace WC.SARS
             string dir = Directory.GetCurrentDirectory() + @"\Data\WeaponData.json";
             //Logger.Warn(dir);
             //Logger.Basic(File.Exists(dir).ToString());
-
+            Weapon[] m_WeaponListGame = new Weapon[0];
             if (!File.Exists(dir))
             {
                 Logger.Failure("Could not find WeaponData.json");
@@ -113,19 +111,19 @@ namespace WC.SARS
             {
                 string ReadData = File.ReadAllText(dir);
                 JSONArray jArray = (JSONArray)JSON.Parse(ReadData);
-                Logger.Success(jArray.Count.ToString());
-                AllWeaponsInGame = new Weapon[jArray.Count];
+                m_WeaponListGame = new Weapon[jArray.Count];
+                //Logger.Success(jArray.Count.ToString());
                 
                 for (int i = 0; i < jArray.Count; i++)
                 {
-                    AllWeaponsInGame[i] = new Weapon(jArray[i], (short)i);
+                    m_WeaponListGame[i] = new Weapon(jArray[i], (short)i);
                 }
             }
             catch (Exception thisExcept)
             {
                 Logger.Failure($"Error processing daat.\nException:: {thisExcept}");
             }
-            return AllWeaponsInGame;
+            return m_WeaponListGame;
         }
     }
 }
