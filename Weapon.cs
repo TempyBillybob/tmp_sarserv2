@@ -9,7 +9,6 @@ namespace WC.SARS
         public WeaponType WeaponType;
         public string Name;
         public short JSONIndex;
-        public int MaxAmmo;
         public int ClipSize;
         public byte AmmoType;
         public byte AmmoSpawnAmount;
@@ -100,8 +99,6 @@ namespace WC.SARS
         static public Weapon[] GetAllWeaponsList()
         {
             string dir = Directory.GetCurrentDirectory() + @"\Data\WeaponData.json";
-            //Logger.Warn(dir);
-            //Logger.Basic(File.Exists(dir).ToString());
             Weapon[] m_WeaponListGame = new Weapon[0];
             if (!File.Exists(dir))
             {
