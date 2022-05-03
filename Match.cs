@@ -186,6 +186,7 @@ namespace WC.SARS
         #region server update thread
         private void serverUpdateThread() //where most things get updated...
         {
+            // TODO - cleanese.
             Logger.Success("Server update thread started.");
             GenerateItemLootList(sv_LootSeed); // Loot Generation Seed
             GenerateHamsterballs(sv_VehicleSeed);
@@ -217,7 +218,6 @@ namespace WC.SARS
                 updateEveryoneOnPlayerInfo();
                 //updateServerTapeCheck(); --similar idea, about as stupid.
 
-                //sleep for a sec 
                 Thread.Sleep(slpTime); // ~1ms delay
             }
 
@@ -243,7 +243,6 @@ namespace WC.SARS
                 advanceTimeAndEventCheck();
                 checkGasTime();
 
-                //sleep for a sec 
                 Thread.Sleep(slpTime); // ~1ms delay
             }
         }
@@ -255,7 +254,6 @@ namespace WC.SARS
             sTimeMsg.Write(timeUntilStart);
             server.SendToAll(sTimeMsg, NetDeliveryMethod.ReliableOrdered);
         }
-
         private void updateEveryoneOnPlayerPositions()
         {
             // TODO - start using match position packet when match starts instead of lobby for lobby.
@@ -460,7 +458,7 @@ namespace WC.SARS
                     NetOutgoingMessage gasMoveMsg = server.CreateMessage();
                     gasMoveMsg.Write((byte)34);
                     //TODO: gasAdvanceLength should just be a float not a double silly billy!
-                    gasMoveMsg.Write((float)gasAdvanceLength); //move time -- higher values allow the gas to move slower, lower values mean fast gas
+                    gasMoveMsg.Write((float)gasAdvanceLength); //move time -- high time = slow move; low time = fast move
                     server.SendToAll(gasMoveMsg, NetDeliveryMethod.ReliableOrdered);
                 }
             }
@@ -468,7 +466,7 @@ namespace WC.SARS
         //can be simplified with gasCheck
         private void advanceTimeAndEventCheck()
         {
-            //basically a copy and paste from checkStartTimer(). Any inaccuracies/inefficency there also appear here.
+            //literally just a copy and paste
             if (prevTimeA != DateTime.Now.Second)
             {
                 matchTime += 1;
@@ -492,15 +490,16 @@ namespace WC.SARS
 
         private void createNewSafezone(float x1, float y1, float x2, float y2, float r1, float r2, float time)
         {
+            // Fixup
             NetOutgoingMessage gasMsg = server.CreateMessage();
             gasMsg.Write((byte)33);
-            gasMsg.Write(x1); //starting circle centerX
-            gasMsg.Write(y1); //starting circle centerY
-            gasMsg.Write(x2); //end circle centerX
-            gasMsg.Write(y2); //end circle centerY
-            gasMsg.Write(r1); //radius of circle1
-            gasMsg.Write(r2); //radius of circle2
-            gasMsg.Write(time); //time until it shall advance
+            gasMsg.Write(x1);   // Start-Circle CenterX
+            gasMsg.Write(y1);   // Start-Circle CenterY
+            gasMsg.Write(x2);   // End-Circle   CenterX
+            gasMsg.Write(y2);   // End-Circle   CenterY
+            gasMsg.Write(r1);   // Start-Circle Radius
+            gasMsg.Write(r2);   // End-Circle   Radius
+            gasMsg.Write(time); // Time until approachment 
             server.SendToAll(gasMsg, NetDeliveryMethod.ReliableOrdered);
             gasAdvanceTimer = time;
         }
@@ -531,13 +530,12 @@ namespace WC.SARS
         }
         #endregion
 
-        // only reason this exists is just so the part of the server code where it checks for connections and stuff isn't clutted too much
-        // until it is pretty close to being fine-enough. it caused a big mess.
+        // right now there really is no reason for a handle message thingy to exist. maybe when things can run asynchronous
         private void HandleMessage(NetIncomingMessage msg)
         {
             byte b = msg.ReadByte();
             //if (b != 14) {
-                //Logger.DebugServer(b.ToString());
+            //Logger.DebugServer(b.ToString());
             //}
 
             switch (b)
@@ -560,7 +558,7 @@ namespace WC.SARS
                 case 7:
                     Player ejectedPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                     NetOutgoingMessage sendEject = server.CreateMessage();
-                    sendEject.Write((byte)8);
+                    sendEject.Write((byte)8); // Forcemove
                     sendEject.Write(ejectedPlayer.myID);
                     sendEject.Write(ejectedPlayer.position_X);
                     sendEject.Write(ejectedPlayer.position_Y);
@@ -591,7 +589,7 @@ namespace WC.SARS
                                 break;
                             }
                         }
-                        else { break;}
+                        else { break; }
                     }
                     if (ANOYING_DEBUG1)
                     {
@@ -642,15 +640,30 @@ namespace WC.SARS
                         }
                     }
                     server.SendToAll(plrShot, NetDeliveryMethod.ReliableSequenced);
+
+                    if ((slotIndex == 1) || (slotIndex == 0))
+                    {
+                        if ((player_list[indexID].MyLootItems[slotIndex].GiveAmount - 1) < 0)
+                        {
+                            player_list[indexID].MyLootItems[slotIndex].GiveAmount = 0;
+                            break;
+                        }
+                        player_list[indexID].MyLootItems[slotIndex].GiveAmount -= 1;
+                        Logger.Warn($"New Player Ammo Count: {player_list[indexID].MyLootItems[slotIndex].GiveAmount}");
+                    }
+
                     break;
                 case 18:
                     serverSendPlayerShoteded(msg);
                     break;
-                case 21: //TODO -- cleanup
+                case 21: //TODO -- cleanup / fix
+                    /* main issue -- client game seems to repeatedly try and claim a loot item. it does this so fast it can claim...
+                    ...the same loot item the server is already dealing with. duping it, and also taking another. glitches mostly drinks and tape
+                    */
                     Logger.Header("Player Looted Item");
                     try
                     {
-                        Player m_CurrentPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
+                        Player thisPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
                         NetOutgoingMessage _extraLootMSG = null; // Extra loot message to send after telling everyone about loot and junk
                         short m_LootID = (short)msg.ReadInt32();
                         byte m_PlayerSlot = msg.ReadByte();
@@ -662,8 +675,15 @@ namespace WC.SARS
                                 Logger.Basic($" -> Player found a weapon.\n{m_LootToGive.LootName}");
                                 if (m_PlayerSlot == 1 || m_PlayerSlot == 0) // Weapon 1 or 2 | Not Melee
                                 {
-                                    m_CurrentPlayer.MyLootItems[m_PlayerSlot] = m_LootToGive;
-                                    Logger.Failure("  -> WARNING NOT YET FULLY HANDLED");
+                                    if (thisPlayer.MyLootItems[m_PlayerSlot].WeaponType != WeaponType.NotWeapon) // means there's already something here
+                                    {
+                                        // So problem, can also dupe weapons. Might need to put a cooldown on when a player can pick them up again...
+                                        LootItem oldLoot = thisPlayer.MyLootItems[m_PlayerSlot];
+                                        _extraLootMSG = MakeNewGunLootItem(oldLoot.LootName, (short)oldLoot.IndexInList, oldLoot.ItemRarity, oldLoot.GiveAmount, new float[] { thisPlayer.position_X, thisPlayer.position_Y, thisPlayer.position_X, thisPlayer.position_Y });
+                                        thisPlayer.MyLootItems[m_PlayerSlot] = m_LootToGive;
+                                    }
+                                    thisPlayer.MyLootItems[m_PlayerSlot] = m_LootToGive;
+                                    //Logger.Failure("  -> WARNING NOT YET FULLY HANDLED");
                                     break;
                                 }
                                 if (m_PlayerSlot != 3) // Slot 3 = Throwables. Slot 2 can't be used; and so anything other than 0, 1, and 3 just skip.
@@ -673,68 +693,70 @@ namespace WC.SARS
                                 }
 
                                 // Throwable / Slot_3 | PlayerSlot 4 | so... m_PlayerSlot-1 = 2 >> right array index
-                                if (m_CurrentPlayer.MyLootItems[2].WeaponType != WeaponType.NotWeapon) // Player has throwable here already
+                                if (thisPlayer.MyLootItems[2].WeaponType != WeaponType.NotWeapon) // Player has throwable here already
                                 {
                                     // uuuh how do we figure this out ?????
-                                    Logger.DebugServer($"Throwable LootName Test: Plr: {m_CurrentPlayer.MyLootItems[2].LootName}\nThis new loot: {m_LootToGive.LootName}");
-                                    if (m_CurrentPlayer.MyLootItems[2].LootName == m_LootToGive.LootName) // Has this throwable-type already
+                                    Logger.DebugServer($"Throwable LootName Test: Plr: {thisPlayer.MyLootItems[2].LootName}\nThis new loot: {m_LootToGive.LootName}");
+                                    if (thisPlayer.MyLootItems[2].LootName == m_LootToGive.LootName) // Has this throwable-type already
                                     {
-                                        m_CurrentPlayer.MyLootItems[2].GiveAmount += m_LootToGive.GiveAmount;
-                                        Logger.Basic($"{m_CurrentPlayer.MyLootItems[2].LootName} - Amount: {m_CurrentPlayer.MyLootItems[2].GiveAmount}");
+                                        thisPlayer.MyLootItems[2].GiveAmount += m_LootToGive.GiveAmount;
+                                        Logger.Basic($"{thisPlayer.MyLootItems[2].LootName} - Amount: {thisPlayer.MyLootItems[2].GiveAmount}");
                                         break;
                                     }
                                     // Else = Player has a throwable, BUT it is a different type so we need to re-spawn the old one
-                                    _extraLootMSG = MakeNewThrowableLootItem((short)m_CurrentPlayer.MyLootItems[2].IndexInList, m_CurrentPlayer.MyLootItems[2].GiveAmount, m_CurrentPlayer.MyLootItems[2].LootName, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    _extraLootMSG = MakeNewThrowableLootItem((short)thisPlayer.MyLootItems[2].IndexInList, thisPlayer.MyLootItems[2].GiveAmount, thisPlayer.MyLootItems[2].LootName, new float[] { thisPlayer.position_X, thisPlayer.position_Y, thisPlayer.position_X, thisPlayer.position_Y });
                                     // Go give player the loot item.
-                                    m_CurrentPlayer.MyLootItems[2] = m_LootToGive;
+                                    thisPlayer.MyLootItems[2] = m_LootToGive;
                                     break;
                                 }
                                 // Player doesn't have a throwable
-                                m_CurrentPlayer.MyLootItems[2] = m_LootToGive; 
+                                thisPlayer.MyLootItems[2] = m_LootToGive; 
                                 break;
                             case LootType.Juices:
                                 Logger.Basic($" -> Player found some drinkies. +{m_LootToGive.GiveAmount}");
-                                if (m_CurrentPlayer.drinkies + m_LootToGive.GiveAmount > 200)
+                                if (thisPlayer.drinkies + m_LootToGive.GiveAmount > 200)
                                 {
-                                    m_LootToGive.GiveAmount -= (byte)(200 - m_CurrentPlayer.drinkies);
-                                    m_CurrentPlayer.drinkies += (byte)(200 - m_CurrentPlayer.drinkies);
-                                    _extraLootMSG = MakeNewDrinkLootItem(m_LootToGive.GiveAmount, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    m_LootToGive.GiveAmount -= (byte)(200 - thisPlayer.drinkies);
+                                    thisPlayer.drinkies += (byte)(200 - thisPlayer.drinkies);
+                                    _extraLootMSG = MakeNewDrinkLootItem(m_LootToGive.GiveAmount, new float[] { thisPlayer.position_X, thisPlayer.position_Y, thisPlayer.position_X, thisPlayer.position_Y });
                                     break;
                                 }
-                                m_CurrentPlayer.drinkies += m_LootToGive.GiveAmount;
+                                thisPlayer.drinkies += m_LootToGive.GiveAmount;
                                 break;
                             case LootType.Tape:
                                 Logger.Basic(" -> Player found some tape.");
-                                if (m_CurrentPlayer.tapies < 5)
+                                if ((thisPlayer.tapies + m_LootToGive.GiveAmount) > 5)
                                 {
-                                    m_CurrentPlayer.tapies += m_LootToGive.GiveAmount;
+                                    m_LootToGive.GiveAmount -= (byte)(5 - thisPlayer.tapies);
+                                    thisPlayer.tapies += (byte)(5 - thisPlayer.tapies);
+                                    _extraLootMSG = MakeNewTapeLootItem(m_LootToGive.GiveAmount, new float[] { thisPlayer.position_X, thisPlayer.position_Y, thisPlayer.position_X, thisPlayer.position_Y });
+                                    break;
                                 }
+                                thisPlayer.tapies += m_LootToGive.GiveAmount;
                                 break;
                             case LootType.Armor:
                                 Logger.Basic($" -> Player got some armor. Tier{m_LootToGive.ItemRarity} - Ticks: {m_LootToGive.GiveAmount}");
-                                if (m_CurrentPlayer.armorTier != 0)
+                                if (thisPlayer.armorTier != 0)
                                 {
-                                    //Logger.DebugServer(" -> Already have armor- spawn old one and give new");
-                                    // Make a message keeping track of the player's old armor
-                                    _extraLootMSG = MakeNewArmorLootItem(m_CurrentPlayer.armorTapes, m_CurrentPlayer.armorTier, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    _extraLootMSG = MakeNewArmorLootItem(thisPlayer.armorTapes, thisPlayer.armorTier, new float[] { thisPlayer.position_X, thisPlayer.position_Y, thisPlayer.position_X, thisPlayer.position_Y });
                                     // Update the player's armor.
-                                    m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
-                                    m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
+                                    thisPlayer.armorTier = m_LootToGive.ItemRarity;
+                                    thisPlayer.armorTapes = m_LootToGive.GiveAmount;
                                     break;
                                 }
-                                //Logger.DebugServer(" -> Player does not already have armor. Giving them armor");
-                                m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
-                                m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
+                                thisPlayer.armorTier = m_LootToGive.ItemRarity;
+                                thisPlayer.armorTapes = m_LootToGive.GiveAmount;
                                 break;
 
-                            // TODO - make server track how much ammo the player has. even though we won't use it
-                            case LootType.Ammo:
+                            // TODO - make sure server tracks ammo not just spawns it and stuff.
+                            case LootType.Ammo: // Ammo Type is stored in LootItem.ItemRarity
                                 Logger.Basic($" -> Ammo Loot: AmmoType:Ammount -- {m_LootToGive.ItemRarity}:{m_LootToGive.GiveAmount}");
+                                // I can't be bothered right now
                                 break;
                         }
                         NetOutgoingMessage testMessage = server.CreateMessage();
                         testMessage.Write((byte)22); // Header / Packet ID
-                        testMessage.Write(m_CurrentPlayer.myID); // Player ID
+                        testMessage.Write(thisPlayer.myID); // Player ID
                         testMessage.Write((int)m_LootID); // Loot Item ID
                         testMessage.Write(m_PlayerSlot); // Player Slot to update
                         if (!matchStarted) // Write Forced Rarity
@@ -813,6 +835,7 @@ namespace WC.SARS
                     break;
 
                 case 29: //Received Reloading
+                    // TODO - make awesome
                     NetOutgoingMessage sendReloadMsg = server.CreateMessage();
                     sendReloadMsg.Write((byte)30);
                     sendReloadMsg.Write(getPlayerID(msg.SenderConnection)); //sent ID
@@ -975,6 +998,8 @@ namespace WC.SARS
                     break;
 
                 case 72: // CLIENT_DESTORY_DOODAD
+                    // TODO - make doodads real.
+
                     //short descXthing = msg.ReadInt16(); //x
                     //short descYthing = msg.ReadInt16(); //y
                     
@@ -984,8 +1009,7 @@ namespace WC.SARS
 
                     NetOutgoingMessage descBroke = server.CreateMessage();
                     descBroke.Write((byte)73); //SERVER_DESTROY_DOODAD
-                    descBroke.Write((short)31257); //at the beginning it searching for a short; HOWEVER, it serves no true purpose
-                    // the only thing that the game does with this value is read and discard it. kind of wacky!
+                    descBroke.Write((short)0); // serves literally no purpose other than the fact the game expects this.
                     descBroke.Write(msg.ReadInt16()); //x 
                     descBroke.Write(msg.ReadInt16()); //y
 
@@ -1009,7 +1033,7 @@ namespace WC.SARS
                     break;
 
                 case 74: //attack windup. appears to only be used when starting to fire the minigun. no where else.
-                    Logger.testmsg("\nAttack Windup used.\nNote if you see this message/find out when.");
+                    Logger.testmsg("\nAttack Windup used.\nIf you notice this say something.");
                     serverSendAttackWindUp(msg);
                     break;
 
@@ -1828,6 +1852,25 @@ namespace WC.SARS
                         }
                         else { responseMsg = "Insufficient amount of arguments provided. usage: /spawndrink {amount}, {X}, {Y}"; }
                         break;
+                    case "/spawntape":
+                        Logger.Success("spawntape command");
+                        if (command.Length > 3)
+                        {
+                            try
+                            {
+                                amount = short.Parse(command[1]);
+                                cPosX = float.Parse(command[2]);
+                                cPosY = float.Parse(command[3]);
+                                server.SendToAll(MakeNewTapeLootItem((byte)amount, new float[] { cPosX, cPosY, cPosX, cPosY }), NetDeliveryMethod.ReliableSequenced);
+                                responseMsg = $"Created Drink item with {amount}Oz of Juice @ ({cPosX}, {cPosY})";
+                            }
+                            catch
+                            {
+                                responseMsg = "Error processing command.";
+                            }
+                        }
+                        else { responseMsg = "Insufficient amount of arguments provided. usage: /spawntape {amount}, {X}, {Y}"; }
+                        break;
                     default:
                         Logger.Failure("Invalid command used.");
                         responseMsg = "Invalid command provided. Please see '/help' for a list of commands.";
@@ -1935,9 +1978,10 @@ namespace WC.SARS
             server.SendToAll(msg, NetDeliveryMethod.ReliableUnordered);
         }
 
-        //r(53) >> s(54)
+        // ClientSentCutGrass >> ServerSentCutGrass
         private void serverSendCutGrass(NetIncomingMessage message)
         {
+            // TOOD - Generate some item loot after cutting grass ?
             byte bladesCut = message.ReadByte();
             NetOutgoingMessage grassMsg = server.CreateMessage();
             grassMsg.Write((byte)54);
@@ -1948,7 +1992,6 @@ namespace WC.SARS
                 grassMsg.Write(message.ReadInt16()); //x
                 grassMsg.Write(message.ReadInt16()); //y
             }
-
             server.SendToAll(grassMsg, NetDeliveryMethod.ReliableOrdered);
         }
 
@@ -2011,15 +2054,10 @@ namespace WC.SARS
             plr.position_X = posX;
             plr.position_Y = posY;
             plr.isDrinking = true;
-
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)48);
             msg.Write(plr.myID);
             server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
-            /* so this whole thing only tells the person/everyone that the person who sent this whole message has
-             * started healing. their game won't update their hp, juice count, tape, how much got taped, etc.
-             * so, that all has to be done on a separate function for the server. sooo figure that out later
-             * when it is time to properly tackle healing and stuff. should not be too difficult*/
         }
 
         //r[87] > s[111]
@@ -2068,7 +2106,7 @@ namespace WC.SARS
             return msg;
         }
         /// <summary>
-        /// Creates a new Armor Loot Item generation message to be sent out, and adds the new item to the loot list. This message MUST be sent.
+        /// Creates a new Armor LootItem generation message to be sent out, and adds the new item to the loot list. This message MUST be sent.
         /// </summary>
         private NetOutgoingMessage MakeNewArmorLootItem(byte armorTicks, byte armorTier, float[] aPositions)
         {
@@ -2084,6 +2122,26 @@ namespace WC.SARS
             msg.Write(aPositions[3]);           // Postion Y2   |  Float
             msg.Write(armorTier);               // Rarity       |  Byte
             ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{armorTier}", armorTier, armorTicks));
+            return msg;
+        }
+
+        /// <summary>
+        /// Creates a new Tape LootItem generation message to be sent out, also adding the newly created item into the loot list. This message must be used.
+        /// </summary>
+        private NetOutgoingMessage MakeNewTapeLootItem(byte tapeAmount, float[] aPositions)
+        {
+            sv_TotalLootCounter++; // Increase LootCounter by 1
+            NetOutgoingMessage msg = server.CreateMessage();
+            msg.Write((byte)20);                // Header       |  Byte
+            msg.Write(sv_TotalLootCounter);      // LootID       |  Int
+            msg.Write((byte)LootType.Tape);   // LootType     |  Byte
+            msg.Write((short)tapeAmount);               // Info/Amount  |  Short
+            msg.Write(aPositions[0]);           // Postion X1   |  Float
+            msg.Write(aPositions[1]);           // Postion Y1   |  Float
+            msg.Write(aPositions[2]);           // Postion X2   |  Float
+            msg.Write(aPositions[3]);           // Postion Y2   |  Float
+            msg.Write((byte)0);
+            ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Tape, WeaponType.NotWeapon, "Tape", 0, tapeAmount));
             return msg;
         }
         /// <summary>
@@ -2103,6 +2161,26 @@ namespace WC.SARS
             msg.Write(aPositions[3]);           // Postion Y2          |  Float
             msg.Write(spawnCount);              // Spawn Amount        |  Byte
             ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Weapon, WeaponType.Throwable, name, 0, (byte)itemIndex, spawnCount));
+            return msg;
+        }
+        /// <summary>
+        /// Creates a new Gun LootItem generation message to be sent out, also adding the newly created item into the loot list. This message must be used.
+        /// </summary>
+        private NetOutgoingMessage MakeNewGunLootItem(string name, short weaponIndex, byte itemRarity, byte clipAmount, float[] aPositions)
+        {
+            NetOutgoingMessage msg = server.CreateMessage();
+            sv_TotalLootCounter++;               // Increase LootCounter by 1
+            msg.Write((byte)20);                 // Header              |  Byte
+            msg.Write(sv_TotalLootCounter);      // LootID              |  Int
+            msg.Write((byte)LootType.Weapon);    // LootType            |  Byte
+            msg.Write(weaponIndex);              // Info/ Which Weapon  |  Short
+            msg.Write(aPositions[0]);            // Postion X1          |  Float
+            msg.Write(aPositions[1]);            // Postion Y1          |  Float
+            msg.Write(aPositions[2]);            // Postion X2          |  Float
+            msg.Write(aPositions[3]);            // Postion Y2          |  Float
+            msg.Write(clipAmount);               // Spawn Amount        |  Byte
+            msg.Write(itemRarity.ToString());               // Spawn Amount        |  Byte
+            ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Weapon, WeaponType.Gun, name, itemRarity, (byte)weaponIndex, clipAmount));
             return msg;
         }
 
