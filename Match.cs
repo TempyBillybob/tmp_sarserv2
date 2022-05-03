@@ -258,9 +258,9 @@ namespace WC.SARS
 
         private void updateEveryoneOnPlayerPositions()
         {
+            // TODO - start using match position packet when match starts instead of lobby for lobby.
             NetOutgoingMessage playerUpdate = server.CreateMessage();
             playerUpdate.Write((byte)11); // Header -- Basic Update Info
-
             for (byte i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] == null)
@@ -269,7 +269,6 @@ namespace WC.SARS
                     break;
                 }
             }
-
             for (int i = 0; i < player_list.Length; i++)
             {
                 if (player_list[i] != null)
@@ -576,6 +575,8 @@ namespace WC.SARS
                     float actX = msg.ReadFloat();
                     float actY = msg.ReadFloat();
                     byte currentwalkMode = msg.ReadByte();
+
+                    // short angle = (short)(mouseAngle * 57.295776f);
 
                     for (short i = 0; i < player_list.Length; i++)
                     {
@@ -902,15 +903,52 @@ namespace WC.SARS
                     serverSendPlayerHamsterballBounce(msg);
                     break;
 
-                case 64:
+                case 64: // Client Hit Vehicle
+                    // TODO - Make sure everything works and cleanup
                     short vehShotWepID = msg.ReadInt16();//WeaponID, ID of the weapon that shot the vehicle
                     short targetedVehicleID = msg.ReadInt16(); //targetVehicleID, vehicle that was shot at
                     short optionalProjectileID = msg.ReadInt16();
+                    if (!HamsterballList.ContainsKey(targetedVehicleID))
+                    {
+                        Logger.Failure($"Error @ Packet-Type 64 [ClientHitVehcile] - Vehicle which was hit doesn't exist in the vehicle list.");
+                        break;
+                    }
+                    if (HamsterballList[targetedVehicleID].HP <= 0)
+                    {
+                        Logger.Failure("Error @ Packet-Type 64 [ClientHitVehcile] - Vehicle which was hit has 0 or less HP. Which means it's gone.");
+                        break;
+                    }
+
+                    // it would seem that the game actually just looks at the item's index in the json list and just says "frick it that's our item"
+                    try
+                    {
+                        Logger.Basic($"Sent Weapon ID: {vehShotWepID}\nWeapon's Name if used as an index: {s_WeaponsList[vehShotWepID].Name}");
+                    }
+                    catch
+                    {
+                        Logger.Failure("Yeah, I bonked this one up.");
+                    }
+
+                    Logger.Warn(s_WeaponsList[vehShotWepID].ArmorDamageOverride.ToString());
+
+                    int dink = s_WeaponsList[vehShotWepID].ArmorDamage;
+                    if (s_WeaponsList[vehShotWepID].ArmorDamageOverride > 0)
+                    {
+                        dink = s_WeaponsList[vehShotWepID].ArmorDamageOverride;
+                    }
+                    if ((HamsterballList[targetedVehicleID].HP - dink) < 0 )
+                    {
+                        HamsterballList[targetedVehicleID].HP = 0;
+                    }
+                    else
+                    {
+                        HamsterballList[targetedVehicleID].HP -= (byte)dink;
+                    }
                     NetOutgoingMessage ballHit = server.CreateMessage();
-                    ballHit.Write( (byte)65 );
+                    ballHit.Write((byte)65);
                     ballHit.Write(getPlayerID(msg.SenderConnection));
                     ballHit.Write(targetedVehicleID);
-                    ballHit.Write( (byte)0 );
+                    ballHit.Write(HamsterballList[targetedVehicleID].HP);
                     ballHit.Write(optionalProjectileID);
                     server.SendToAll(ballHit, NetDeliveryMethod.ReliableUnordered);
                     break;
