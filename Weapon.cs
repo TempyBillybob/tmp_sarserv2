@@ -15,6 +15,8 @@ namespace WC.SARS
         public int Damage;
         public int DamageIncrease;
         public int ArmorDamage;
+        public int ArmorDamageOverride;
+        public bool PenetratesArmor;
         public byte RarityMaxVal;
         public byte RarityMinVal;
         public byte SpawnSizeOverworld;
@@ -22,10 +24,7 @@ namespace WC.SARS
 
         public Weapon(JSONNode data, short index)
         {
-            //string readValue;
-            //look, just because something will likely be true. doesn't mean some dingus isn't going to mess it up.
             JSONIndex = index;
-
             if (data["inventoryID"]) Name = data["inventoryID"];
             if (data["weaponClass"])
             {
@@ -51,26 +50,30 @@ namespace WC.SARS
                     }
                 }
             }
-            // much of this [by much I mean all] should just be in the "if-gun" section
+            // eat my shorts
             if (data["minRarity"])
             {
                 RarityMinVal = (byte)data["minRarity"].AsInt;
-                //Logger.Basic(RarityMinVal.ToString());
             }
             if (data["maxRarity"])
             {
                 RarityMaxVal = (byte)data["maxRarity"].AsInt;
-                //Logger.Basic(RarityMaxVal.ToString());
             }
             if (data["damageNormal"])
             {
-                Damage = data["damageNormal"].AsInt; 
-                //Logger.Basic(Damage.ToString());
+                Damage = data["damageNormal"].AsInt;
             }
             if (data["breaksArmorAmount"])
             {
                 ArmorDamage = data["breaksArmorAmount"].AsInt;
-                //Logger.Basic(ArmorDamage.ToString());
+            }
+            if (data["overrideBreaksVehicleAmount"]) // applies to sniper for sure and should apply to magnum as well but IT DOESN'T IN THIS FUCKING UPDATE
+            {
+                ArmorDamage = data["overrideBreaksVehicleAmount"].AsInt;
+            }
+            if (data["damageThroughArmor"]) // applies to dartgun for sure- likely bow/crossbow as well
+            {
+                PenetratesArmor = data["damageThroughArmor"].AsBool;
             }
             if (data["addedDamagePerRarity"])
             {
