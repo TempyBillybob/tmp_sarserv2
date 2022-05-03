@@ -69,7 +69,7 @@ namespace WC.SARS
             }
             if (data["overrideBreaksVehicleAmount"]) // applies to sniper for sure and should apply to magnum as well but IT DOESN'T IN THIS FUCKING UPDATE
             {
-                ArmorDamage = data["overrideBreaksVehicleAmount"].AsInt;
+                ArmorDamageOverride = data["overrideBreaksVehicleAmount"].AsInt;
             }
             if (data["damageThroughArmor"]) // applies to dartgun for sure- likely bow/crossbow as well
             {
