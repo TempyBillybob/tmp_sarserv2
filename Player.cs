@@ -64,8 +64,6 @@ namespace WC.SARS
         public bool isDrinking = false;
         public bool isTaping = false;
         public bool isAlive = true;
-
-        //constructor edited: 2/24/22
         public Player(short assignedID, short characterID, short parasollID, short gravestoneID, short deathExplosionID, short[] emotes, short hatID, short glassesID, short beardID, short clothingID, short meleeID, byte skinCount, short[] skinKeys, byte[] skinValues, string thisName, NetConnection senderAddress)
         {
             this.myName = thisName;
@@ -90,23 +88,21 @@ namespace WC.SARS
                 new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0)
             };
         }
-
         /* Death Notes:
          * Weapon: 
-         * 0 -- Melee?
-         * -1  -- nothing
+         *  0 -- Melee?
+         * -1 -- Nothing
          * -2 == Killfeed Hammer
          * -3 == Killfeed Explosiion lol
-         * -4 -- nothing
+         * -4 -- Nothing
          * 
          * 
          * Killing Player:
-         * anything 0+ = player
-         * -1 -- nothing
+         * 0=> = Player
+         * -1 -- Nothing
          * -2 == Gas
          * -3 == Banan Gods (/killed)
          * 
          */
-
     }
 }
