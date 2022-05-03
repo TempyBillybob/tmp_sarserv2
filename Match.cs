@@ -9,7 +9,6 @@ namespace WC.SARS
 {
     class Match
     {
-        Random randomizer = new Random();
         private NetPeerConfiguration config;
         public NetServer server;
         public Player[] player_list;
@@ -20,25 +19,29 @@ namespace WC.SARS
         private Dictionary<NetConnection, string> IncomingConnectionsList;
         private Dictionary<int, LootItem> ItemList;
         //private Dictionary<int, VAL> CoconutList;
-        //private Dictionary<int, Vehicle>;
+        private Dictionary<int, Vehicle> HamsterballList;
 
         private JSONArray s_PlayerDataJSON;
-        private int s_TotalLootCounter;
-        private int matchSeed1, matchSeed2, matchSeed3; //these are supposed to be random
+        private int sv_TotalLootCounter, sv_LootSeed, sv_CoconutSeed, sv_VehicleSeed; // Spawnable Item Generation Seeds
         private int slpTime, prevTime, prevTimeA, matchTime;
         private bool matchStarted, matchFull;
         private bool isSorting, isSorted;
         public double timeUntilStart, gasAdvanceTimer, gasAdvanceLength;
 
         //mmmmmmmmmmmmmmmmmmmmmmmmmmmmm
-        public bool DEBUG_ENABLED;
         public bool ANOYING_DEBUG1;
         private bool doWinCheck = false;
         private bool shouldUpdateAliveCount = true;
 
         public Match(int port, string ip, bool db, bool annoying)
         {
-            s_TotalLootCounter = 0;
+            sv_TotalLootCounter = 0;
+
+            // Spawn Loot Generation Seeds
+            sv_LootSeed = 351301;
+            sv_CoconutSeed = 5328522;
+            sv_VehicleSeed = 9037281;
+
             slpTime = 10;
             matchStarted = false;
             matchFull = false;
@@ -53,7 +56,6 @@ namespace WC.SARS
             gasAdvanceTimer = -1;
             prevTime = DateTime.Now.Second;
             updateThread = new Thread(serverUpdateThread);
-            DEBUG_ENABLED = db;
             ANOYING_DEBUG1 = annoying;
 
             // Initializing JSON stuff
@@ -67,13 +69,14 @@ namespace WC.SARS
                 Logger.Failure("No such file 'playerdata.json'");
                 Environment.Exit(2);
             }
+
             // NetServer Initialization and starting
             config = new NetPeerConfiguration("BR2D");
             config.EnableMessageType(NetIncomingMessageType.ConnectionLatencyUpdated);
             config.PingInterval = 22f;
             config.LocalAddress = System.Net.IPAddress.Parse(ip);
             config.Port = port;
-            server = new NetServer(config); // todo make sure server actually starts before having to launch update thread? || believe that is done
+            server = new NetServer(config);
             server.Start();
             updateThread.Start();
             NetIncomingMessage msg;
@@ -184,7 +187,9 @@ namespace WC.SARS
         private void serverUpdateThread() //where most things get updated...
         {
             Logger.Success("Server update thread started.");
-            GenerateItemLootList(351301); //should be the matchSeed1 or something
+            GenerateItemLootList(sv_LootSeed); // Loot Generation Seed
+            GenerateHamsterballs(sv_VehicleSeed);
+
             if (!doWinCheck)
             {
                 Logger.Warn("\nWARNING -- doWinCheck is set to FALSE. The server will NOT check for a winner without intervention.");
@@ -509,7 +514,6 @@ namespace WC.SARS
         //TODO : Make this better :3
         private void sendStartGame()
         {
-            if (DEBUG_ENABLED) { Logger.Warn("Sending game begin to all clients!"); }
             NetOutgoingMessage startMsg = server.CreateMessage();
             startMsg.Write((byte)6); //Header
             startMsg.Write(20f); //x1
@@ -646,7 +650,7 @@ namespace WC.SARS
                     try
                     {
                         Player m_CurrentPlayer = player_list[getPlayerArrayIndex(msg.SenderConnection)];
-                        NetOutgoingMessage __ExtraLoot = null; // Extra loot message to send after telling everyone about loot and junk
+                        NetOutgoingMessage _extraLootMSG = null; // Extra loot message to send after telling everyone about loot and junk
                         short m_LootID = (short)msg.ReadInt32();
                         byte m_PlayerSlot = msg.ReadByte();
                         LootItem m_LootToGive = ItemList[m_LootID];
@@ -661,7 +665,7 @@ namespace WC.SARS
                                     Logger.Failure("  -> WARNING NOT YET FULLY HANDLED");
                                     break;
                                 }
-                                if (m_PlayerSlot != 3) // This is the throwable slot. Slot_2 is melee. 
+                                if (m_PlayerSlot != 3) // Slot 3 = Throwables. Slot 2 can't be used; and so anything other than 0, 1, and 3 just skip.
                                 {
                                     Logger.Failure("  -> Player has found a weapon. However, none of the slot it claims to be accessing are valid here.");
                                     break;
@@ -674,78 +678,26 @@ namespace WC.SARS
                                     Logger.DebugServer($"Throwable LootName Test: Plr: {m_CurrentPlayer.MyLootItems[2].LootName}\nThis new loot: {m_LootToGive.LootName}");
                                     if (m_CurrentPlayer.MyLootItems[2].LootName == m_LootToGive.LootName) // Has this throwable-type already
                                     {
-                                        m_CurrentPlayer.MyLootItems[2].GunAmmo += m_LootToGive.GunAmmo;
-                                        Logger.Basic($"{m_CurrentPlayer.MyLootItems[2].LootName} - Amount: {m_CurrentPlayer.MyLootItems[2].GunAmmo}");
+                                        m_CurrentPlayer.MyLootItems[2].GiveAmount += m_LootToGive.GiveAmount;
+                                        Logger.Basic($"{m_CurrentPlayer.MyLootItems[2].LootName} - Amount: {m_CurrentPlayer.MyLootItems[2].GiveAmount}");
                                         break;
                                     }
                                     // Else = Player has a throwable, BUT it is a different type so we need to re-spawn the old one
-                                    s_TotalLootCounter++;
-                                    NetOutgoingMessage newLoot = server.CreateMessage();
-                                    newLoot.Write((byte)20);
-                                    newLoot.Write(s_TotalLootCounter);
-                                    newLoot.Write((byte)LootType.Weapon);
-                                    Logger.Warn(m_CurrentPlayer.MyLootItems[2].IndexInList.ToString());
-                                    Logger.Warn(s_WeaponsList[m_CurrentPlayer.MyLootItems[2].IndexInList].JSONIndex.ToString());
-                                    Logger.Warn(m_CurrentPlayer.MyLootItems[2].GunAmmo.ToString());
-                                    newLoot.Write((short)m_CurrentPlayer.MyLootItems[2].IndexInList);
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write(m_CurrentPlayer.MyLootItems[2].GunAmmo);
-                                    newLoot.Write(m_CurrentPlayer.MyLootItems[2].GunAmmo.ToString());
-                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
-                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Weapon, WeaponType.Throwable, m_CurrentPlayer.MyLootItems[2].LootName, 0, (byte)m_CurrentPlayer.MyLootItems[2].IndexInList, m_CurrentPlayer.MyLootItems[2].GunAmmo));
-
-                                    //clip ammount = ammount to spawn
-
+                                    _extraLootMSG = MakeNewThrowableLootItem((short)m_CurrentPlayer.MyLootItems[2].IndexInList, m_CurrentPlayer.MyLootItems[2].GiveAmount, m_CurrentPlayer.MyLootItems[2].LootName, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    // Go give player the loot item.
                                     m_CurrentPlayer.MyLootItems[2] = m_LootToGive;
                                     break;
                                 }
                                 // Player doesn't have a throwable
-                                m_CurrentPlayer.MyLootItems[2] = m_LootToGive;
-                                    // throwables = slot 3
-                                   /* switch (m_PlayerSlot)
-                                {
-                                    case 0:
-                                        Logger.Warn(" -> Recieved slot = 0");
-                                        break;
-                                    case 1:
-                                        Logger.Warn(" -> Recieved slot = 1");
-                                        break;
-                                    case 2:
-                                        Logger.Warn(" -> Recieved slot = 2");
-                                        break;
-                                    default:
-                                        Logger.Warn($" -> Yeah unhandled slot. {m_PlayerSlot}");
-                                        break;
-                                }*/
+                                m_CurrentPlayer.MyLootItems[2] = m_LootToGive; 
                                 break;
                             case LootType.Juices:
                                 Logger.Basic($" -> Player found some drinkies. +{m_LootToGive.GiveAmount}");
-
-                                //Logger.DebugServer($"difference: {(int)m_CurrentPlayer.drinkies + m_LootToGive.GiveAmount}");
-                                // TODO -- Find out if this number can overroll. because they're bytes and junk and like... they get turned into ints but like... can they roll over before being added?
                                 if (m_CurrentPlayer.drinkies + m_LootToGive.GiveAmount > 200)
                                 {
                                     m_LootToGive.GiveAmount -= (byte)(200 - m_CurrentPlayer.drinkies);
                                     m_CurrentPlayer.drinkies += (byte)(200 - m_CurrentPlayer.drinkies);
-                                    __ExtraLoot = MakeNewDrinkLootItem(m_LootToGive.GiveAmount, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
-                                    /*NetOutgoingMessage newLoot = server.CreateMessage();
-                                    s_TotalLootCounter++;
-                                    newLoot.Write((byte)20);
-                                    newLoot.Write(s_TotalLootCounter);
-                                    newLoot.Write((byte)LootType.Juices);
-                                    newLoot.Write((short)m_LootToGive.GiveAmount);
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write((byte)0);
-                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
-                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{m_LootToGive.GiveAmount}", 0, m_LootToGive.GiveAmount));
-                                    //Logger.DebugServer($"New Give: {m_LootToGive.GiveAmount}\nDrinkies: {m_CurrentPlayer.drinkies}");
-                                    */
+                                    _extraLootMSG = MakeNewDrinkLootItem(m_LootToGive.GiveAmount, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
                                     break;
                                 }
                                 m_CurrentPlayer.drinkies += m_LootToGive.GiveAmount;
@@ -754,34 +706,22 @@ namespace WC.SARS
                                 Logger.Basic(" -> Player found some tape.");
                                 if (m_CurrentPlayer.tapies < 5)
                                 {
-                                    m_CurrentPlayer.tapies += m_LootToGive.GiveAmount; // Yes, generated tapes give one, but what about looted tapes?
+                                    m_CurrentPlayer.tapies += m_LootToGive.GiveAmount;
                                 }
                                 break;
                             case LootType.Armor:
-                                Logger.Basic($" -> Player got some armor. Tier{m_LootToGive.ItemRarity}:{m_LootToGive.GiveAmount}");
+                                Logger.Basic($" -> Player got some armor. Tier{m_LootToGive.ItemRarity} - Ticks: {m_LootToGive.GiveAmount}");
                                 if (m_CurrentPlayer.armorTier != 0)
                                 {
-                                    Logger.DebugServer(" -> Already have armor- spawn old one and give new");
-                                    //go spawn the old one
-                                    NetOutgoingMessage newLoot = server.CreateMessage();
-                                    s_TotalLootCounter++;
-                                    newLoot.Write((byte)20);
-                                    newLoot.Write(s_TotalLootCounter);
-                                    newLoot.Write((byte)LootType.Armor);
-                                    newLoot.Write((short)m_CurrentPlayer.armorTapes); // Armor's Tape Amount
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write(m_CurrentPlayer.position_X);
-                                    newLoot.Write(m_CurrentPlayer.position_Y);
-                                    newLoot.Write(m_CurrentPlayer.armorTier); // The actual tier of armor the game will display and stuff
-                                    server.SendToAll(newLoot, NetDeliveryMethod.ReliableOrdered);
-                                    ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{m_CurrentPlayer.armorTier}", m_CurrentPlayer.armorTier, m_CurrentPlayer.armorTapes));
-                                    
+                                    //Logger.DebugServer(" -> Already have armor- spawn old one and give new");
+                                    // Make a message keeping track of the player's old armor
+                                    _extraLootMSG = MakeNewArmorLootItem(m_CurrentPlayer.armorTapes, m_CurrentPlayer.armorTier, new float[] { m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y, m_CurrentPlayer.position_X, m_CurrentPlayer.position_Y });
+                                    // Update the player's armor.
                                     m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
                                     m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
                                     break;
                                 }
-                                Logger.DebugServer(" -> Player does not already have armor. Giving them armor");
+                                //Logger.DebugServer(" -> Player does not already have armor. Giving them armor");
                                 m_CurrentPlayer.armorTier = m_LootToGive.ItemRarity;
                                 m_CurrentPlayer.armorTapes = m_LootToGive.GiveAmount;
                                 break;
@@ -802,9 +742,9 @@ namespace WC.SARS
                         }
                         testMessage.Write((byte)0);
                         server.SendToAll(testMessage, NetDeliveryMethod.ReliableSequenced);
-                        if (__ExtraLoot != null)
+                        if (_extraLootMSG != null)
                         {
-                            server.SendToAll(__ExtraLoot, NetDeliveryMethod.ReliableSequenced);
+                            server.SendToAll(_extraLootMSG, NetDeliveryMethod.ReliableSequenced);
                         }
                     } catch (Exception Except)
                     {
@@ -899,6 +839,17 @@ namespace WC.SARS
                 case 55: //Entering a hamball
                     short vehPlr = getPlayerArrayIndex(msg.SenderConnection);
                     short enteredVehicleID = msg.ReadInt16();
+                    if (!HamsterballList.ContainsKey(enteredVehicleID))
+                    {
+                        Logger.Failure($"Error @ Packet-Type 55 [Enter Vehicle] -- Vehicle ID '{enteredVehicleID}' does not exist.");
+                        break;
+                    }
+                    if (HamsterballList[enteredVehicleID].HP <= 0)
+                    {
+                        Logger.Failure($"Error @ Packet-Type 55 [Enter Vehicle] -- Player attempted to enter a vehicle (Vehicle ID: {enteredVehicleID}), but it should be broken. Refusing their request.");
+                        break;
+                    }
+                    // TODO - probably should check ownership of the vehicle. like, is anyone already in it and stuff?
                     NetOutgoingMessage enterVehicle = server.CreateMessage();
                     enterVehicle.Write((byte)56);
                     enterVehicle.Write(player_list[vehPlr].myID); //sent ID
@@ -911,6 +862,7 @@ namespace WC.SARS
 
                 //clientSendExitHamsterball
                 case 57:
+                    // TODO -- when messing with hammerball owners, reset owner.
                     short vehPlrEx = getPlayerArrayIndex(msg.SenderConnection);
                     NetOutgoingMessage exitVehicle = server.CreateMessage();
                     exitVehicle.Write((byte)58);
@@ -954,11 +906,6 @@ namespace WC.SARS
                     short vehShotWepID = msg.ReadInt16();//WeaponID, ID of the weapon that shot the vehicle
                     short targetedVehicleID = msg.ReadInt16(); //targetVehicleID, vehicle that was shot at
                     short optionalProjectileID = msg.ReadInt16();
-                    if (DEBUG_ENABLED)
-                    {
-                        Logger.Header($"Someone has shot a hamsterball...");
-                        Logger.Basic($"Weapon ID: {vehShotWepID}\nTargeted Vehicle ID: {targetedVehicleID}\nProjectile ID: {optionalProjectileID}");
-                    }
                     NetOutgoingMessage ballHit = server.CreateMessage();
                     ballHit.Write( (byte)65 );
                     ballHit.Write(getPlayerID(msg.SenderConnection));
@@ -1171,9 +1118,9 @@ namespace WC.SARS
             mMsg.Write(sendingID); // Assigned Player ID
 
             // todo: *must* make match seeds random. could just use system.Random() but didn't wanna bother yet
-            mMsg.Write(351301);  // int32 -- seed 1 (GameServer: Sent LootGen Seed)
-            mMsg.Write(5328522); // int32 -- seed 2 (GameServer: Sent CoconutGen Seed)
-            mMsg.Write(9037281); // int32 -- seed 2 (GameServer: Sent VehicleGen Seed)
+            mMsg.Write(sv_LootSeed);    // int32 -- seed 1 (GameServer: Sent LootGen Seed)
+            mMsg.Write(sv_CoconutSeed); // int32 -- seed 2 (GameServer: Sent CoconutGen Seed)
+            mMsg.Write(sv_VehicleSeed); // int32 -- seed 2 (GameServer: Sent VehicleGen Seed)
 
             mMsg.Write(timeUntilStart); // double -- clientTimeAtWhichGameWillStart
             mMsg.Write("yerhAGJ");      // string -- Match UUID ||  [ MatchUUID ]
@@ -1302,7 +1249,7 @@ namespace WC.SARS
              */
             try
             {
-                Player shotPlayer = null;
+                Player shotPlayer;
                 for (int i = 0; i < player_list.Length; i++)
                 {
                     if (player_list != null && player_list[i].myID == hitPlayerID)
@@ -1894,9 +1841,9 @@ namespace WC.SARS
         private void serverSendGrenadeThrowing(NetIncomingMessage message)
         {
             Player _plr = player_list[getPlayerArrayIndex(message.SenderConnection)];
-            if ((_plr.MyLootItems[2].GunAmmo - 1) >= 0)
+            if ((_plr.MyLootItems[2].GiveAmount - 1) >= 0)
             {
-                _plr.MyLootItems[2].GunAmmo -= 1;
+                _plr.MyLootItems[2].GiveAmount -= 1;
                 NetOutgoingMessage msg = server.CreateMessage();
                 msg.Write((byte)39);
                 for (byte i = 0; i < 3; i++)
@@ -1908,7 +1855,7 @@ namespace WC.SARS
                 msg.Write(grenadeID);
                 msg.Write(grenadeID);//likely needs to be unique. not sure how. maybe just make the server have its own counter
                 server.SendToAll(msg, NetDeliveryMethod.ReliableSequenced);
-                if (_plr.MyLootItems[2].GunAmmo == 0)
+                if (_plr.MyLootItems[2].GiveAmount == 0)
                 {
                     _plr.MyLootItems[2] = new LootItem(-1, LootType.Collectable, WeaponType.NotWeapon, "NOTHING", 0, 0);
                 }
@@ -2068,10 +2015,10 @@ namespace WC.SARS
         /// </summary>
         private NetOutgoingMessage MakeNewDrinkLootItem(short aDrinkAmount, float[] aPositions)
         {
-            s_TotalLootCounter++; // Increase LootCounter by 1
+            sv_TotalLootCounter++; // Increase LootCounter by 1
             NetOutgoingMessage msg = server.CreateMessage();
             msg.Write((byte)20);                // Header       |  Byte
-            msg.Write(s_TotalLootCounter);      // LootID       |  Int
+            msg.Write(sv_TotalLootCounter);      // LootID       |  Int
             msg.Write((byte)LootType.Juices);   // LootType     |  Byte
             msg.Write(aDrinkAmount);            // Info/Amount  |  Short
             msg.Write(aPositions[0]);           // Postion X1   |  Float
@@ -2079,7 +2026,7 @@ namespace WC.SARS
             msg.Write(aPositions[2]);           // Postion X2   |  Float
             msg.Write(aPositions[3]);           // Postion Y2   |  Float
             msg.Write((byte)0);
-            ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{aDrinkAmount}", 0, (byte)aDrinkAmount));
+            ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Juices, WeaponType.NotWeapon, $"Health Juice-{aDrinkAmount}", 0, (byte)aDrinkAmount));
             return msg;
         }
         /// <summary>
@@ -2088,9 +2035,9 @@ namespace WC.SARS
         private NetOutgoingMessage MakeNewArmorLootItem(byte armorTicks, byte armorTier, float[] aPositions)
         {
             NetOutgoingMessage msg = server.CreateMessage();
-            s_TotalLootCounter++;               // Increase LootCounter by 1
+            sv_TotalLootCounter++;               // Increase LootCounter by 1
             msg.Write((byte)20);                // Header       |  Byte
-            msg.Write(s_TotalLootCounter);      // LootID       |  Int
+            msg.Write(sv_TotalLootCounter);      // LootID       |  Int
             msg.Write((byte)LootType.Armor);    // LootType     |  Byte
             msg.Write((short)armorTicks);       // Info/Amount  |  Short
             msg.Write(aPositions[0]);           // Postion X1   |  Float
@@ -2098,7 +2045,26 @@ namespace WC.SARS
             msg.Write(aPositions[2]);           // Postion X2   |  Float
             msg.Write(aPositions[3]);           // Postion Y2   |  Float
             msg.Write(armorTier);               // Rarity       |  Byte
-            ItemList.Add(s_TotalLootCounter, new LootItem(s_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{armorTier}", armorTier, armorTicks));
+            ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{armorTier}", armorTier, armorTicks));
+            return msg;
+        }
+        /// <summary>
+        /// Creates a new Throwable LootItem generation message to be sent out, also adding the newly created item into the loot list. This message must be used.
+        /// </summary>
+        private NetOutgoingMessage MakeNewThrowableLootItem(short itemIndex, byte spawnCount, string name, float[] aPositions)
+        {
+            NetOutgoingMessage msg = server.CreateMessage();
+            sv_TotalLootCounter++;               // Increase LootCounter by 1
+            msg.Write((byte)20);                // Header       |  Byte
+            msg.Write(sv_TotalLootCounter);      // LootID       |  Int
+            msg.Write((byte)LootType.Weapon);   // LootType     |  Byte
+            msg.Write(itemIndex);               // Info/ Which Weapon  |  Short
+            msg.Write(aPositions[0]);           // Postion X1          |  Float
+            msg.Write(aPositions[1]);           // Postion Y1          |  Float
+            msg.Write(aPositions[2]);           // Postion X2          |  Float
+            msg.Write(aPositions[3]);           // Postion Y2          |  Float
+            msg.Write(spawnCount);              // Spawn Amount        |  Byte
+            ItemList.Add(sv_TotalLootCounter, new LootItem(sv_TotalLootCounter, LootType.Weapon, WeaponType.Throwable, name, 0, (byte)itemIndex, spawnCount));
             return msg;
         }
 
@@ -2107,16 +2073,16 @@ namespace WC.SARS
         /// </summary>
         private void GenerateItemLootList(int seed)
         {
+            // TODO - Find out how to get a list of all Item spawn tiles.
             Logger.Warn("Attempting to Generate ItemList");
+            sv_TotalLootCounter = 0;
             MersenneTwister MerTwist = new MersenneTwister((uint)seed);
             ItemList = new Dictionary<int, LootItem>();
             int LootID = 0;
-            s_TotalLootCounter = 0;
             bool YesMakeBetter;
             uint MinGenValue;
             uint num;
             List<short> WeaponsToChooseByIndex = new List<short>();
-            //Logger.DebugServer($"This Weapon List Length: {MyWeaponsList.Length}"); -- can remove
 
             //for each weapon in the game/dataset, add each into a frequency list of all weapons by its-Frequency-amount-of-times
             // does that make sense?
@@ -2134,8 +2100,8 @@ namespace WC.SARS
             for (int i = 0; i < 1837; i++)
             {
                 //LootID++; -- > LootID++ after completing a loop. sorta.
-                LootID = s_TotalLootCounter;
-                s_TotalLootCounter++;
+                LootID = sv_TotalLootCounter;
+                sv_TotalLootCounter++;
                 MinGenValue = 0U;
                 YesMakeBetter = false;
                 //if (i >= 1447) YesMakeBetter = true;
@@ -2186,15 +2152,6 @@ namespace WC.SARS
                         {
                             GenTier = 2;
                         }
-                        /*old check worser math. either gets a tier 2 or 3.
-                        if (65.0 < num && num <= 92.0)
-                        {
-                            GenTier = 2;
-                        }
-                        else if (num < 92.0)
-                        {
-                            GenTier = 3;
-                        } //else --> GenTier = 1 */
             ItemList.Add(LootID, new LootItem(LootID, LootType.Armor, WeaponType.NotWeapon, $"Armor-Tier{GenTier}", GenTier, GenTier)); // GiveAmount for armor is how many tick it has. gotta reuse stuff
                     }
                     else
@@ -2212,7 +2169,7 @@ namespace WC.SARS
                             // If anything goes wrong with RNG... well it might be this but it also might not. But most changes to WeaponData WILL have an effect here
 
                             short thisInd = WeaponsToChooseByIndex[(int)MerTwist.NextUInt(0U, (uint)WeaponsToChooseByIndex.Count)];
-                            Weapon GeneratedWeapon = s_WeaponsList[(int)thisInd];
+                            Weapon GeneratedWeapon = s_WeaponsList[thisInd];
                             //num = MerTwist.NextUInt(0U, (uint)Weapon.AllWeaponsInGame.Length);
                             //num = MerTwist.NextUInt(0U, 101U);
 
@@ -2233,8 +2190,6 @@ namespace WC.SARS
                              * if it is a throwable you just spawn it depending on how many should spawn in the overworld
                              *  (if memory serves correctly; bananas you are able to 2 of. everything other throwable spawns in 1s)
                              */
-
-
                             if (GeneratedWeapon.WeaponType == WeaponType.Gun)
                             {
                                 byte ItemRarity = 0;
@@ -2259,8 +2214,8 @@ namespace WC.SARS
                                 // Spawn Ammo
                                 for (int a = 0; a < 2; a++)
                                 {
-                                    LootID = s_TotalLootCounter;
-                                    s_TotalLootCounter++;
+                                    LootID = sv_TotalLootCounter;
+                                    sv_TotalLootCounter++;
                                     //LootID++;
                                     ItemList.Add(LootID, new LootItem(LootID, LootType.Ammo, WeaponType.NotWeapon, $"Ammo-Type{GeneratedWeapon.AmmoType}", GeneratedWeapon.AmmoType, GeneratedWeapon.AmmoSpawnAmount));
                                 }
@@ -2274,8 +2229,26 @@ namespace WC.SARS
                 }
             }
             //Logger.Success($"Successfully generated the ItemList.Count:LootIDCount {ItemList.Keys.Count}:{LootID + 1}");
-            //Logger.Success($"ItemList.Count:LootIDCount -- {ItemList.Keys.Count}:{s_TotalLootCounter}");
+            //Logger.Success($"ItemList.Count:LootIDCount -- {ItemList.Keys.Count}:{sv_TotalLootCounter}");
         }
+        private void GenerateHamsterballs(int seed)
+        {
+            Logger.Warn("Generating Hamsterballs...");
+            MersenneTwister rng = new MersenneTwister((uint)seed);
+            HamsterballList = new Dictionary<int, Vehicle>();
+            // TODO - find out how to load a list of all vehicle-spawn tiles.
+            int num = 0;
+            for (int i = 0; i < 89; i++) // at this moment, we are aware there are 89 total spots. not *where* though, which comes with the data. oh well.
+            {
+                if (rng.NextUInt(0U, 100U) > 55.0)
+                {
+                    HamsterballList.Add(num, new Vehicle((byte)3, (short)num));
+                    num++;
+                }
+            }
+            //Logger.DebugServer($"Successfully generated: {num} hamsterballs!"); << -- used to check if generated amounts line up (which they do right now)
+        }
+
 
         #region player list methods
         /// <summary>

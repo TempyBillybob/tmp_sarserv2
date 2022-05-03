@@ -14,7 +14,6 @@ namespace WC.SARS
         Tier2,
         Tier3
     }
-    
     public enum LootType
     {
         Weapon,
@@ -97,6 +96,7 @@ namespace WC.SARS
             ItemRarity = aItemRarity;
             IndexInList = aWeaponIndex;
             GunAmmo = aAmmoAmount;
+            GiveAmount = (byte)GunAmmo; // Throwables use GiveAmmount
         }
     }
 }
