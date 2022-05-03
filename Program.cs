@@ -15,7 +15,6 @@ namespace WC.SARS
             else
             {
                 bool runSetup = true;
-
                 Logger.Warn("If you know, you know. ['Y' OR 'N' key]");
                 while (runSetup)
                 {
